@@ -32,6 +32,7 @@ import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.core.io.IOCallback;
 import org.apache.activemq.artemis.core.server.Queue;
 import org.apache.activemq.artemis.core.server.ServerConsumer;
+import org.apache.activemq.artemis.core.server.impl.ServerSessionImpl;
 import org.apache.activemq.artemis.core.transaction.Transaction;
 import org.jboss.logging.Logger;
 
@@ -68,7 +69,10 @@ public class MQTTPublishManager {
    }
 
    synchronized void stop() throws Exception {
-      session.getServerSession().removeProducer(session.getServerSession().getName());
+      ServerSessionImpl serversession = session.getServerSession();
+      if (serversession != null) {
+         serversession.removeProducer(serversession.getName());
+      }
       if (managementConsumer != null) {
          managementConsumer.removeItself();
          managementConsumer.setStarted(false);
@@ -265,7 +269,7 @@ public class MQTTPublishManager {
       switch (message.getType()) {
          case Message.TEXT_TYPE:
             try {
-               SimpleString text = message.getReadOnlyBodyBuffer().readNullableSimpleString();
+               SimpleString text = message.getDataBuffer().readNullableSimpleString();
                byte[] stringPayload = text.toString().getBytes("UTF-8");
                payload = ByteBufAllocator.DEFAULT.buffer(stringPayload.length);
                payload.writeBytes(stringPayload);
@@ -274,8 +278,9 @@ public class MQTTPublishManager {
                log.warn("Unable to send message: " + message.getMessageID() + " Cause: " + e.getMessage(), e);
             }
          default:
-            ActiveMQBuffer bufferDup = message.getReadOnlyBodyBuffer();
-            payload = bufferDup.readBytes(bufferDup.writerIndex()).byteBuf();
+            ActiveMQBuffer bodyBuffer = message.getDataBuffer();
+            payload = ByteBufAllocator.DEFAULT.buffer(bodyBuffer.writerIndex());
+            payload.writeBytes(bodyBuffer.byteBuf());
             break;
       }
       session.getProtocolHandler().send(messageId, address, qos, isRetain, payload, deliveryCount);

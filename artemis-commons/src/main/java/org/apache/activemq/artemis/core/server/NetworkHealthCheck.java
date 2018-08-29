@@ -60,6 +60,8 @@ public class NetworkHealthCheck extends ActiveMQScheduledComponent {
    // To be used on tests. As we use the loopback as a valid address on tests.
    private boolean ignoreLoopback = false;
 
+   private boolean ownShutdown = false;
+
    /**
     * The timeout to be used on isReachable
     */
@@ -274,7 +276,7 @@ public class NetworkHealthCheck extends ActiveMQScheduledComponent {
 
       if (healthy) {
          for (ActiveMQComponent component : componentList) {
-            if (!component.isStarted()) {
+            if (!component.isStarted() && ownShutdown) {
                try {
                   ActiveMQUtilLogger.LOGGER.startingService(component.toString());
                   component.start();
@@ -282,10 +284,12 @@ public class NetworkHealthCheck extends ActiveMQScheduledComponent {
                   ActiveMQUtilLogger.LOGGER.errorStartingComponent(e, component.toString());
                }
             }
+            ownShutdown = false;
          }
       } else {
          for (ActiveMQComponent component : componentList) {
             if (component.isStarted()) {
+               ownShutdown = true;
                try {
                   ActiveMQUtilLogger.LOGGER.stoppingService(component.toString());
                   component.stop();
@@ -380,7 +384,7 @@ public class NetworkHealthCheck extends ActiveMQScheduledComponent {
          if (error) {
             ActiveMQUtilLogger.LOGGER.failedToReadFromStream(inputLine);
          } else {
-            logger.trace(inputLine);
+            logger.debug(inputLine);
          }
       }
 

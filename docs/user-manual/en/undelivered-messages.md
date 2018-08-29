@@ -8,18 +8,18 @@ in the queue indefinitely, clogging the system.
 
 There are 2 ways to deal with these undelivered messages:
 
--   Delayed redelivery.
+- Delayed redelivery.
 
-    It is possible to delay messages redelivery.  This gives the client some
-    time to recover from any transient failures and to prevent overloading
-    its network or CPU resources.
+  It is possible to delay messages redelivery.  This gives the client some
+  time to recover from any transient failures and to prevent overloading
+  its network or CPU resources.
 
--   Dead Letter Address.
+- Dead Letter Address.
 
-    It is also possible to configure a dead letter address so that after
-    a specified number of unsuccessful deliveries, messages are removed
-    from their queue and sent to the dead letter address.  These messages
-    will not be delivered again from this queue.
+  It is also possible to configure a dead letter address so that after
+  a specified number of unsuccessful deliveries, messages are removed
+  from their queue and sent to the dead letter address.  These messages
+  will not be delivered again from this queue.
 
 Both options can be combined for maximum flexibility.
 
@@ -35,16 +35,17 @@ consuming valuable CPU and network resources.
 
 Delayed redelivery is defined in the address-setting configuration:
 
-    <!-- delay redelivery of messages for 5s -->
-    <address-setting match="exampleQueue">
-    <!-- default is 1.0 -->
-    <redelivery-delay-multiplier>1.5</redelivery-delay-multiplier>
-    <!-- default is 0 (no delay) -->
-    <redelivery-delay>5000</redelivery-delay>
-    <!-- default is redelivery-delay * 10 -->
-    <max-redelivery-delay>50000</max-redelivery-delay>
-
-    </address-setting>
+```xml
+<!-- delay redelivery of messages for 5s -->
+<address-setting match="exampleQueue">
+   <!-- default is 1.0 -->
+   <redelivery-delay-multiplier>1.5</redelivery-delay-multiplier>
+   <!-- default is 0 (no delay) -->
+   <redelivery-delay>5000</redelivery-delay>
+   <!-- default is redelivery-delay * 10 -->
+   <max-redelivery-delay>50000</max-redelivery-delay>
+</address-setting>
+```
 
 If a `redelivery-delay` is specified, Apache ActiveMQ Artemis will wait this delay
 before redelivering the messages.
@@ -102,12 +103,14 @@ from the dead letter address for further inspection.
 
 Dead letter address is defined in the address-setting configuration:
 
-    <!-- undelivered messages in exampleQueue will be sent to the dead letter address
-    deadLetterQueue after 3 unsuccessful delivery attempts -->
-    <address-setting match="exampleQueue">
-    <dead-letter-address>deadLetterQueue</dead-letter-address>
-    <max-delivery-attempts>3</max-delivery-attempts>
-    </address-setting>
+```xml
+<!-- undelivered messages in exampleQueue will be sent to the dead letter address
+deadLetterQueue after 3 unsuccessful delivery attempts -->
+<address-setting match="exampleQueue">
+   <dead-letter-address>deadLetterQueue</dead-letter-address>
+   <max-delivery-attempts>3</max-delivery-attempts>
+</address-setting>
+```
 
 If a `dead-letter-address` is not specified, messages will removed after
 `max-delivery-attempts` unsuccessful attempts.
@@ -127,15 +130,15 @@ set of addresses (see [Understanding the Wildcard Syntax](wildcard-syntax.md)).
 Dead letter messages which are consumed from a dead letter address have
 the following properties:
 
--   `_AMQ_ORIG_ADDRESS`
+- `_AMQ_ORIG_ADDRESS`
 
-    a String property containing the *original address* of the dead
-    letter message
+  a String property containing the *original address* of the dead
+  letter message
 
--   `_AMQ_ORIG_QUEUE`
+- `_AMQ_ORIG_QUEUE`
 
-    a String property containing the *original queue* of the dead letter
-    message
+  a String property containing the *original queue* of the dead letter
+  message
 
 ### Example
 
@@ -167,4 +170,6 @@ due to performance implications.
 To enable it, set `persist-delivery-count-before-delivery` to `true` in
 `broker.xml`:
 
-    <persist-delivery-count-before-delivery>true</persist-delivery-count-before-delivery>
+```xml
+<persist-delivery-count-before-delivery>true</persist-delivery-count-before-delivery>
+```

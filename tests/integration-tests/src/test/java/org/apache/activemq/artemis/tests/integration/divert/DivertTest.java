@@ -37,7 +37,7 @@ import org.apache.activemq.artemis.core.server.ActiveMQServers;
 import org.apache.activemq.artemis.core.server.Divert;
 import org.apache.activemq.artemis.api.core.RoutingType;
 
-import org.apache.activemq.artemis.core.server.cluster.Transformer;
+import org.apache.activemq.artemis.core.server.transformer.Transformer;
 import org.apache.activemq.artemis.core.server.impl.ActiveMQServerImpl;
 import org.apache.activemq.artemis.core.server.impl.ServiceRegistryImpl;
 import org.apache.activemq.artemis.core.settings.impl.AddressSettings;
@@ -104,6 +104,10 @@ public class DivertTest extends ActiveMQTestBase {
 
          Assert.assertEquals(i, message.getObjectProperty(propKey));
 
+         Assert.assertEquals("forwardAddress", message.getAddress());
+
+         Assert.assertEquals("testAddress", message.getStringProperty(Message.HDR_ORIGINAL_ADDRESS));
+
          message.acknowledge();
       }
 
@@ -115,6 +119,8 @@ public class DivertTest extends ActiveMQTestBase {
          Assert.assertNotNull(message);
 
          Assert.assertEquals(i, message.getObjectProperty(propKey));
+
+         Assert.assertEquals("testAddress", message.getAddress());
 
          message.acknowledge();
       }
@@ -350,7 +356,7 @@ public class DivertTest extends ActiveMQTestBase {
          System.out.println("Received message " + message);
          assertNotNull(message);
 
-         if (message.getStringProperty(Message.HDR_ORIGINAL_QUEUE).equals("queue1")) {
+         if (message.getStringProperty(Message.HDR_ORIGINAL_QUEUE).equals("divert1")) {
             countOriginal1++;
          } else if (message.getStringProperty(Message.HDR_ORIGINAL_QUEUE).equals("queue2")) {
             countOriginal2++;
@@ -589,6 +595,10 @@ public class DivertTest extends ActiveMQTestBase {
          Assert.assertNotNull(message);
 
          Assert.assertEquals(i, message.getObjectProperty(propKey));
+
+         Assert.assertEquals("forwardAddress", message.getAddress());
+
+         Assert.assertEquals("testAddress", message.getStringProperty(Message.HDR_ORIGINAL_ADDRESS));
 
          message.acknowledge();
       }

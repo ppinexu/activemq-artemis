@@ -78,7 +78,7 @@ import org.apache.activemq.artemis.jms.client.ActiveMQConnectionFactory;
 import org.apache.activemq.artemis.spi.core.security.ActiveMQJAASSecurityManager;
 import org.apache.activemq.artemis.spi.core.security.ActiveMQSecurityManager;
 import org.apache.activemq.artemis.spi.core.security.jaas.InVMLoginModule;
-import org.apache.activemq.artemis.tests.util.ActiveMQTestBase;
+import org.apache.activemq.artemis.tests.util.SpawnedTestBase;
 import org.apache.activemq.artemis.tests.util.SpawnedVMSupport;
 import org.apache.activemq.artemis.tests.util.Wait;
 import org.junit.After;
@@ -86,7 +86,7 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-public class SendAckFailTest extends ActiveMQTestBase {
+public class SendAckFailTest extends SpawnedTestBase {
 
    @Before
    @After
@@ -668,13 +668,13 @@ public class SendAckFailTest extends ActiveMQTestBase {
       }
 
       @Override
-      public long storePageCounter(long txID, long queueID, long value) throws Exception {
-         return manager.storePageCounter(txID, queueID, value);
+      public long storePageCounter(long txID, long queueID, long value, long size) throws Exception {
+         return manager.storePageCounter(txID, queueID, value, size);
       }
 
       @Override
-      public long storePendingCounter(long queueID, long pageID, int inc) throws Exception {
-         return manager.storePendingCounter(queueID, pageID, inc);
+      public long storePendingCounter(long queueID, long pageID) throws Exception {
+         return manager.storePendingCounter(queueID, pageID);
       }
 
       @Override
@@ -693,13 +693,13 @@ public class SendAckFailTest extends ActiveMQTestBase {
       }
 
       @Override
-      public long storePageCounterInc(long txID, long queueID, int add) throws Exception {
-         return manager.storePageCounterInc(txID, queueID, add);
+      public long storePageCounterInc(long txID, long queueID, int add, long size) throws Exception {
+         return manager.storePageCounterInc(txID, queueID, add, size);
       }
 
       @Override
-      public long storePageCounterInc(long queueID, int add) throws Exception {
-         return manager.storePageCounterInc(queueID, add);
+      public long storePageCounterInc(long queueID, int add, long size) throws Exception {
+         return manager.storePageCounterInc(queueID, add, size);
       }
 
       @Override

@@ -35,7 +35,6 @@ import org.apache.activemq.artemis.api.core.ActiveMQException;
 import org.apache.activemq.artemis.api.core.JsonUtil;
 import org.apache.activemq.artemis.api.core.Message;
 import org.apache.activemq.artemis.api.core.SimpleString;
-import org.apache.activemq.artemis.api.core.management.MessageCounterInfo;
 import org.apache.activemq.artemis.api.core.management.QueueControl;
 import org.apache.activemq.artemis.core.filter.Filter;
 import org.apache.activemq.artemis.core.filter.impl.FilterImpl;
@@ -64,6 +63,7 @@ import org.apache.activemq.artemis.utils.collections.LinkedListIterator;
 public class QueueControlImpl extends AbstractControl implements QueueControl {
 
    public static final int FLUSH_LIMIT = 500;
+
    // Constants -----------------------------------------------------
 
    // Attributes ----------------------------------------------------
@@ -176,6 +176,20 @@ public class QueueControlImpl extends AbstractControl implements QueueControl {
    }
 
    @Override
+   public String getUser() {
+      checkStarted();
+
+      clearIO();
+      try {
+         SimpleString user = queue.getUser();
+         return user == null ? null : user.toString();
+      } finally {
+         blockOnIO();
+      }
+   }
+
+
+   @Override
    public String getRoutingType() {
       checkStarted();
 
@@ -213,6 +227,42 @@ public class QueueControlImpl extends AbstractControl implements QueueControl {
    }
 
    @Override
+   public long getPersistentSize() {
+      checkStarted();
+
+      clearIO();
+      try {
+         return queue.getPersistentSize();
+      } finally {
+         blockOnIO();
+      }
+   }
+
+   @Override
+   public long getDurableMessageCount() {
+      checkStarted();
+
+      clearIO();
+      try {
+         return queue.getDurableMessageCount();
+      } finally {
+         blockOnIO();
+      }
+   }
+
+   @Override
+   public long getDurablePersistentSize() {
+      checkStarted();
+
+      clearIO();
+      try {
+         return queue.getDurablePersistentSize();
+      } finally {
+         blockOnIO();
+      }
+   }
+
+   @Override
    public int getConsumerCount() {
       checkStarted();
 
@@ -231,6 +281,42 @@ public class QueueControlImpl extends AbstractControl implements QueueControl {
       clearIO();
       try {
          return queue.getDeliveringCount();
+      } finally {
+         blockOnIO();
+      }
+   }
+
+   @Override
+   public long getDeliveringSize() {
+      checkStarted();
+
+      clearIO();
+      try {
+         return queue.getDeliveringSize();
+      } finally {
+         blockOnIO();
+      }
+   }
+
+   @Override
+   public int getDurableDeliveringCount() {
+      checkStarted();
+
+      clearIO();
+      try {
+         return queue.getDurableDeliveringCount();
+      } finally {
+         blockOnIO();
+      }
+   }
+
+   @Override
+   public long getDurableDeliveringSize() {
+      checkStarted();
+
+      clearIO();
+      try {
+         return queue.getDurableDeliveringSize();
       } finally {
          blockOnIO();
       }
@@ -309,6 +395,42 @@ public class QueueControlImpl extends AbstractControl implements QueueControl {
    }
 
    @Override
+   public long getScheduledSize() {
+      checkStarted();
+
+      clearIO();
+      try {
+         return queue.getScheduledSize();
+      } finally {
+         blockOnIO();
+      }
+   }
+
+   @Override
+   public long getDurableScheduledCount() {
+      checkStarted();
+
+      clearIO();
+      try {
+         return queue.getDurableScheduledCount();
+      } finally {
+         blockOnIO();
+      }
+   }
+
+   @Override
+   public long getDurableScheduledSize() {
+      checkStarted();
+
+      clearIO();
+      try {
+         return queue.getDurableScheduledSize();
+      } finally {
+         blockOnIO();
+      }
+   }
+
+   @Override
    public String getDeadLetterAddress() {
       checkStarted();
 
@@ -362,6 +484,30 @@ public class QueueControlImpl extends AbstractControl implements QueueControl {
       clearIO();
       try {
          return queue.isPurgeOnNoConsumers();
+      } finally {
+         blockOnIO();
+      }
+   }
+
+   @Override
+   public boolean isExclusive() {
+      checkStarted();
+
+      clearIO();
+      try {
+         return queue.isExclusive();
+      } finally {
+         blockOnIO();
+      }
+   }
+
+   @Override
+   public boolean isLastValue() {
+      checkStarted();
+
+      clearIO();
+      try {
+         return queue.isLastValue();
       } finally {
          blockOnIO();
       }
@@ -531,31 +677,52 @@ public class QueueControlImpl extends AbstractControl implements QueueControl {
    }
 
    @Override
-   public long countMessages(final String filterStr) throws Exception {
-      checkStarted();
+   public long countMessages() throws Exception {
+      return countMessages(null);
+   }
 
+   @Override
+   public long countMessages(final String filterStr) throws Exception {
+      Long value = intenalCountMessages(filterStr, null).get(null);
+      return value == null ? 0 : value;
+   }
+
+   @Override
+   public String countMessages(final String filterStr, final String groupByProperty) throws Exception {
+      return JsonUtil.toJsonObject(intenalCountMessages(filterStr, groupByProperty)).toString();
+   }
+
+   private Map<String, Long> intenalCountMessages(final String filterStr, final String groupByPropertyStr) throws Exception {
+      checkStarted();
       clearIO();
+      Map<String, Long> result = new HashMap<>();
+
       try {
          Filter filter = FilterImpl.createFilter(filterStr);
-         if (filter == null) {
-            return getMessageCount();
+         SimpleString groupByProperty = SimpleString.toSimpleString(groupByPropertyStr);
+         if (filter == null && groupByProperty == null) {
+            result.put(null, getMessageCount());
          } else {
             try (LinkedListIterator<MessageReference> iterator = queue.browserIterator()) {
-               int count = 0;
-
                try {
                   while (iterator.hasNext()) {
-                     MessageReference ref = iterator.next();
-                     if (filter.match(ref.getMessage())) {
-                        count++;
+                     Message message = iterator.next().getMessage();
+                     if (filter == null || filter.match(message)) {
+                        if (groupByProperty == null) {
+                           result.compute(null, (k,v) -> v == null ? 1 : ++v);
+                        } else {
+                           Object value = message.getObjectProperty(groupByProperty);
+                           String valueStr = value == null ? null : value.toString();
+                           result.compute(valueStr, (k,v) -> v == null ? 1 : ++v);
+                        }
                      }
                   }
                } catch (NoSuchElementException ignored) {
                   // this could happen through paging browsing
                }
-               return count;
             }
          }
+         return result;
       } finally {
          blockOnIO();
       }
@@ -682,7 +849,7 @@ public class QueueControlImpl extends AbstractControl implements QueueControl {
             throw ActiveMQMessageBundle.BUNDLE.noQueueFound(otherQueueName);
          }
 
-         return queue.moveReference(messageID, binding.getAddress(), rejectDuplicates);
+         return queue.moveReference(messageID, binding.getAddress(), binding, rejectDuplicates);
       } finally {
          blockOnIO();
       }
@@ -711,7 +878,7 @@ public class QueueControlImpl extends AbstractControl implements QueueControl {
             throw ActiveMQMessageBundle.BUNDLE.noQueueFound(otherQueueName);
          }
 
-         int retValue = queue.moveReferences(flushLimit, filter, binding.getAddress(), rejectDuplicates);
+         int retValue = queue.moveReferences(flushLimit, filter, binding.getAddress(), rejectDuplicates, binding);
 
          return retValue;
       } finally {
@@ -842,7 +1009,7 @@ public class QueueControlImpl extends AbstractControl implements QueueControl {
 
       clearIO();
       try {
-         return MessageCounterInfo.toJSon(counter);
+         return counter.toJSon();
       } catch (Exception e) {
          throw new IllegalStateException(e);
       } finally {
@@ -947,6 +1114,47 @@ public class QueueControlImpl extends AbstractControl implements QueueControl {
    }
 
    @Override
+   public CompositeData[] browse(int page, int pageSize) throws Exception {
+      String filter = null;
+      checkStarted();
+
+      clearIO();
+      try {
+         long index = 0;
+         long start = (page - 1) * pageSize;
+         long end = Math.min(page * pageSize, queue.getMessageCount());
+
+         ArrayList<CompositeData> c = new ArrayList<>();
+         Filter thefilter = FilterImpl.createFilter(filter);
+         queue.flushExecutor();
+
+         try (LinkedListIterator<MessageReference> iterator = queue.browserIterator()) {
+            try {
+               while (iterator.hasNext() && index < end) {
+                  MessageReference ref = iterator.next();
+                  if (thefilter == null || thefilter.match(ref.getMessage())) {
+                     if (index >= start) {
+                        c.add(OpenTypeSupport.convert(ref));
+                     }
+                  }
+                  index++;
+               }
+            } catch (NoSuchElementException ignored) {
+               // this could happen through paging browsing
+            }
+
+            CompositeData[] rc = new CompositeData[c.size()];
+            c.toArray(rc);
+            return rc;
+         }
+      } catch (ActiveMQException e) {
+         throw new IllegalStateException(e.getMessage());
+      } finally {
+         blockOnIO();
+      }
+   }
+
+   @Override
    public CompositeData[] browse() throws Exception {
       return browse(null);
    }
@@ -992,6 +1200,70 @@ public class QueueControlImpl extends AbstractControl implements QueueControl {
       clearIO();
       try {
          queue.flushExecutor();
+      } finally {
+         blockOnIO();
+      }
+   }
+
+   @Override
+   public void resetAllGroups() {
+      checkStarted();
+
+      clearIO();
+      try {
+         queue.resetAllGroups();
+      } finally {
+         blockOnIO();
+      }
+   }
+
+   @Override
+   public void resetGroup(String groupID) {
+      checkStarted();
+
+      clearIO();
+      try {
+         queue.resetGroup(SimpleString.toSimpleString(groupID));
+      } finally {
+         blockOnIO();
+      }
+   }
+
+   @Override
+   public int getGroupCount() {
+      checkStarted();
+
+      clearIO();
+      try {
+         return queue.getGroupCount();
+      } finally {
+         blockOnIO();
+      }
+   }
+
+   @Override
+   public String listGroupsAsJSON() throws Exception {
+      checkStarted();
+
+      clearIO();
+      try {
+         Map<SimpleString, Consumer> groups = queue.getGroups();
+
+         JsonArrayBuilder jsonArray = JsonLoader.createArrayBuilder();
+
+         for (Map.Entry<SimpleString, Consumer> group : groups.entrySet()) {
+
+            if (group.getValue() instanceof ServerConsumer) {
+               ServerConsumer serverConsumer = (ServerConsumer) group.getValue();
+
+               JsonObjectBuilder obj = JsonLoader.createObjectBuilder().add("groupID", group.getKey().toString()).add("consumerID", serverConsumer.getID()).add("connectionID", serverConsumer.getConnectionID().toString()).add("sessionID", serverConsumer.getSessionID()).add("browseOnly", serverConsumer.isBrowseOnly()).add("creationTime", serverConsumer.getCreationTime());
+
+               jsonArray.add(obj);
+            }
+
+         }
+
+         return jsonArray.build().toString();
       } finally {
          blockOnIO();
       }

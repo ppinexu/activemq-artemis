@@ -16,9 +16,9 @@
  */
 package org.apache.activemq.artemis.core.client.impl;
 
+import org.apache.activemq.artemis.api.core.RoutingType;
 import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.api.core.client.ClientSession;
-import org.apache.activemq.artemis.api.core.RoutingType;
 
 public class QueueQueryImpl implements ClientSession.QueueQuery {
 
@@ -47,6 +47,12 @@ public class QueueQueryImpl implements ClientSession.QueueQuery {
    private final boolean purgeOnNoConsumers;
 
    private final int maxConsumers;
+
+   private final Boolean exclusive;
+
+   private final Boolean lastValue;
+
+   private final Integer defaultConsumerWindowSize;
 
    public QueueQueryImpl(final boolean durable,
                          final boolean temporary,
@@ -84,6 +90,24 @@ public class QueueQueryImpl implements ClientSession.QueueQuery {
                          final boolean autoCreated,
                          final boolean purgeOnNoConsumers,
                          final RoutingType routingType) {
+      this(durable, temporary, consumerCount, messageCount, filterString, address, name, exists, autoCreateQueues, maxConsumers, autoCreated, purgeOnNoConsumers, routingType, null, null, null);
+   }
+   public QueueQueryImpl(final boolean durable,
+                         final boolean temporary,
+                         final int consumerCount,
+                         final long messageCount,
+                         final SimpleString filterString,
+                         final SimpleString address,
+                         final SimpleString name,
+                         final boolean exists,
+                         final boolean autoCreateQueues,
+                         final int maxConsumers,
+                         final boolean autoCreated,
+                         final boolean purgeOnNoConsumers,
+                         final RoutingType routingType,
+                         final Boolean exclusive,
+                         final Boolean lastValue,
+                         final Integer defaultConsumerWindowSize) {
       this.durable = durable;
       this.temporary = temporary;
       this.consumerCount = consumerCount;
@@ -97,6 +121,9 @@ public class QueueQueryImpl implements ClientSession.QueueQuery {
       this.autoCreated = autoCreated;
       this.purgeOnNoConsumers = purgeOnNoConsumers;
       this.routingType = routingType;
+      this.exclusive = exclusive;
+      this.lastValue = lastValue;
+      this.defaultConsumerWindowSize = defaultConsumerWindowSize;
    }
 
    @Override
@@ -164,5 +191,19 @@ public class QueueQueryImpl implements ClientSession.QueueQuery {
       return autoCreated;
    }
 
+   @Override
+   public Boolean isExclusive() {
+      return exclusive;
+   }
+
+   @Override
+   public Boolean isLastValue() {
+      return lastValue;
+   }
+
+   @Override
+   public Integer getDefaultConsumerWindowSize() {
+      return defaultConsumerWindowSize;
+   }
 }
 

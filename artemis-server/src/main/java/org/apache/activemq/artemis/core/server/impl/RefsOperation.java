@@ -24,6 +24,7 @@ import java.util.Map;
 
 import org.apache.activemq.artemis.api.core.Message;
 import org.apache.activemq.artemis.core.paging.cursor.NonExistentPage;
+import org.apache.activemq.artemis.core.paging.cursor.PagedReference;
 import org.apache.activemq.artemis.core.persistence.StorageManager;
 import org.apache.activemq.artemis.core.server.ActiveMQServerLogger;
 import org.apache.activemq.artemis.core.server.MessageReference;
@@ -80,7 +81,7 @@ public class RefsOperation extends TransactionOperationAbstract {
       List<MessageReference> ackedRefs = new ArrayList<>();
 
       for (MessageReference ref : refsToAck) {
-         ref.setConsumerId(null);
+         ref.emptyConsumerID();
 
          if (logger.isTraceEnabled()) {
             logger.trace("rolling back " + ref);
@@ -129,7 +130,7 @@ public class RefsOperation extends TransactionOperationAbstract {
             }
             ackedTX.commit(true);
          } catch (Exception e) {
-            ActiveMQServerLogger.LOGGER.warn(e.getMessage(), e);
+            ActiveMQServerLogger.LOGGER.failedToProcessMessageReferenceAfterRollback(e);
          }
       }
    }
@@ -159,7 +160,9 @@ public class RefsOperation extends TransactionOperationAbstract {
 
       if (pagedMessagesToPostACK != null) {
          for (MessageReference refmsg : pagedMessagesToPostACK) {
-            decrementRefCount(refmsg);
+            if (((PagedReference) refmsg).isLargeMessage()) {
+               decrementRefCount(refmsg);
+            }
          }
       }
    }
@@ -171,7 +174,7 @@ public class RefsOperation extends TransactionOperationAbstract {
          // This could happen on after commit, since the page could be deleted on file earlier by another thread
          logger.debug(e);
       } catch (Exception e) {
-         ActiveMQServerLogger.LOGGER.warn(e.getMessage(), e);
+         ActiveMQServerLogger.LOGGER.failedToDecrementMessageReferenceCount(e);
       }
    }
 
@@ -186,7 +189,7 @@ public class RefsOperation extends TransactionOperationAbstract {
    public synchronized List<MessageReference> getListOnConsumer(long consumerID) {
       List<MessageReference> list = new LinkedList<>();
       for (MessageReference ref : refsToAck) {
-         if (ref.getConsumerId() != null && ref.getConsumerId().equals(consumerID)) {
+         if (ref.hasConsumerId() && ref.getConsumerId() == consumerID) {
             list.add(ref);
          }
       }

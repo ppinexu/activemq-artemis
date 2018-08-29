@@ -20,10 +20,16 @@ import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.List;
 
+import org.apache.activemq.artemis.utils.critical.CriticalAnalyzer;
+
 /**
  * A SequentialFileFactory
  */
 public interface SequentialFileFactory {
+
+   default CriticalAnalyzer getCriticalAnalyzer() {
+      return null;
+   }
 
    SequentialFile createSequentialFile(String fileName);
 
@@ -101,4 +107,6 @@ public interface SequentialFileFactory {
    SequentialFileFactory setDatasync(boolean enabled);
 
    boolean isDatasync();
+
+   long getBufferSize();
 }

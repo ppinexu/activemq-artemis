@@ -75,7 +75,9 @@ import org.apache.activemq.artemis.core.server.cluster.ActiveMQServerSideProtoco
 import org.apache.activemq.artemis.core.server.cluster.ClusterConnection;
 import org.apache.activemq.artemis.core.server.cluster.ClusterManager;
 import org.apache.activemq.artemis.core.server.cluster.RemoteQueueBinding;
+import org.apache.activemq.artemis.core.server.cluster.impl.BridgeMetrics;
 import org.apache.activemq.artemis.core.server.cluster.impl.ClusterConnectionImpl;
+import org.apache.activemq.artemis.core.server.cluster.impl.ClusterConnectionMetrics;
 import org.apache.activemq.artemis.core.server.cluster.impl.MessageLoadBalancingType;
 import org.apache.activemq.artemis.core.server.cluster.qourum.SharedNothingBackupQuorum;
 import org.apache.activemq.artemis.core.server.group.GroupingHandler;
@@ -1286,6 +1288,22 @@ public abstract class ClusterTestBase extends ActiveMQTestBase {
       verifyReceiveRoundRobinInSomeOrder(false, numMessages, consumerIDs);
    }
 
+   protected void verifyClusterMetrics(final int node, final String clusterName, final long expectedMessagesPendingAcknowledgement,
+         final long expectedMessagesAcknowledged) {
+      final ClusterConnection clusterConnection = servers[node].getClusterManager().getClusterConnection(clusterName);
+      final ClusterConnectionMetrics clusterMetrics = clusterConnection.getMetrics();
+      assertEquals(expectedMessagesPendingAcknowledgement, clusterMetrics.getMessagesPendingAcknowledgement());
+      assertEquals(expectedMessagesAcknowledged, clusterMetrics.getMessagesAcknowledged());
+   }
+
+   protected void verifyBridgeMetrics(final int node, final String clusterName, final String bridgeNodeId,
+         final long expectedMessagesPendingAcknowledgement, final long expectedMessagesAcknowledged) {
+      final ClusterConnection clusterConnection = servers[node].getClusterManager().getClusterConnection(clusterName);
+      final BridgeMetrics bridgeMetrics = clusterConnection.getBridgeMetrics(bridgeNodeId);
+      assertEquals(expectedMessagesPendingAcknowledgement, bridgeMetrics.getMessagesPendingAcknowledgement());
+      assertEquals(expectedMessagesAcknowledged, bridgeMetrics.getMessagesAcknowledged());
+   }
+
    protected int[] getReceivedOrder(final int consumerID) throws Exception {
       return getReceivedOrder(consumerID, false);
    }
@@ -1734,6 +1752,17 @@ public abstract class ClusterTestBase extends ActiveMQTestBase {
                                          final boolean netty,
                                          final int nodeFrom,
                                          final int... nodesTo) {
+      setupClusterConnection(name, address, messageLoadBalancingType, maxHops, netty, null, nodeFrom, nodesTo);
+   }
+
+   protected void setupClusterConnection(final String name,
+                                         final String address,
+                                         final MessageLoadBalancingType messageLoadBalancingType,
+                                         final int maxHops,
+                                         final boolean netty,
+                                         final ClusterConfigCallback cb,
+                                         final int nodeFrom,
+                                         final int... nodesTo) {
       ActiveMQServer serverFrom = servers[nodeFrom];
 
       if (serverFrom == null) {
@@ -1752,6 +1781,9 @@ public abstract class ClusterTestBase extends ActiveMQTestBase {
       Configuration config = serverFrom.getConfiguration();
       ClusterConnectionConfiguration clusterConf = createClusterConfig(name, address, messageLoadBalancingType, maxHops, connectorFrom, pairs);
 
+      if (cb != null) {
+         cb.configure(clusterConf);
+      }
       config.getClusterConfigurations().add(clusterConf);
    }
 
@@ -1911,5 +1943,9 @@ public abstract class ClusterTestBase extends ActiveMQTestBase {
       }
       int port = TransportConstants.DEFAULT_PORT + node;
       return "tcp://localhost:" + port;
+   }
+
+   public interface ClusterConfigCallback {
+      void configure(ClusterConnectionConfiguration config);
    }
 }

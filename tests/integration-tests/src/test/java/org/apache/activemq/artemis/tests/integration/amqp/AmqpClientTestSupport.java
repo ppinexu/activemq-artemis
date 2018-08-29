@@ -44,8 +44,17 @@ import org.apache.activemq.transport.amqp.client.AmqpMessage;
 import org.apache.activemq.transport.amqp.client.AmqpSender;
 import org.apache.activemq.transport.amqp.client.AmqpSession;
 import org.apache.qpid.proton.amqp.Symbol;
+import org.apache.qpid.proton.amqp.messaging.DeleteOnClose;
+import org.apache.qpid.proton.amqp.messaging.Source;
+import org.apache.qpid.proton.amqp.messaging.Target;
+import org.apache.qpid.proton.amqp.messaging.TerminusDurability;
+import org.apache.qpid.proton.amqp.messaging.TerminusExpiryPolicy;
 import org.junit.After;
 import org.junit.Before;
+
+import static org.apache.activemq.transport.amqp.AmqpSupport.LIFETIME_POLICY;
+import static org.apache.activemq.transport.amqp.AmqpSupport.TEMP_QUEUE_CAPABILITY;
+import static org.apache.activemq.transport.amqp.AmqpSupport.TEMP_TOPIC_CAPABILITY;
 
 /**
  * Test support class for tests that will be using the AMQP Proton wrapper client. This is to
@@ -185,7 +194,6 @@ public class AmqpClientTestSupport extends AmqpTestSupport {
       HashMap<String, Object> params = new HashMap<>();
       params.put(TransportConstants.PORT_PROP_NAME, String.valueOf(port));
       params.put(TransportConstants.PROTOCOLS_PROP_NAME, getConfiguredProtocols());
-
       HashMap<String, Object> amqpParams = new HashMap<>();
       configureAMQPAcceptorParameters(amqpParams);
 
@@ -202,7 +210,7 @@ public class AmqpClientTestSupport extends AmqpTestSupport {
 
       addressSettings.setAddressFullMessagePolicy(AddressFullMessagePolicy.PAGE);
       addressSettings.setAutoCreateQueues(isAutoCreateQueues());
-      addressSettings.setAutoCreateAddresses(isAutoCreateQueues());
+      addressSettings.setAutoCreateAddresses(isAutoCreateAddresses());
       addressSettings.setDeadLetterAddress(SimpleString.toSimpleString(getDeadLetterAddress()));
       addressSettings.setExpiryAddress(SimpleString.toSimpleString(getDeadLetterAddress()));
 
@@ -217,11 +225,11 @@ public class AmqpClientTestSupport extends AmqpTestSupport {
    }
 
    protected void createAddressAndQueues(ActiveMQServer server) throws Exception {
-      // Default DLQ
+      // Default Queue
       server.addAddressInfo(new AddressInfo(SimpleString.toSimpleString(getQueueName()), RoutingType.ANYCAST));
       server.createQueue(SimpleString.toSimpleString(getQueueName()), RoutingType.ANYCAST, SimpleString.toSimpleString(getQueueName()), null, true, false, -1, false, true);
 
-      // Default Queue
+      // Default DLQ
       server.addAddressInfo(new AddressInfo(SimpleString.toSimpleString(getDeadLetterAddress()), RoutingType.ANYCAST));
       server.createQueue(SimpleString.toSimpleString(getDeadLetterAddress()), RoutingType.ANYCAST, SimpleString.toSimpleString(getDeadLetterAddress()), null, true, false, -1, false, true);
 
@@ -257,10 +265,10 @@ public class AmqpClientTestSupport extends AmqpTestSupport {
          // Configure roles
          HierarchicalRepository<Set<Role>> securityRepository = server.getSecurityRepository();
          HashSet<Role> value = new HashSet<>();
-         value.add(new Role("nothing", false, false, false, false, false, false, false, false));
-         value.add(new Role("browser", false, false, false, false, false, false, false, true));
-         value.add(new Role("guest", false, true, false, false, false, false, false, true));
-         value.add(new Role("full", true, true, true, true, true, true, true, true));
+         value.add(new Role("nothing", false, false, false, false, false, false, false, false, false, false));
+         value.add(new Role("browser", false, false, false, false, false, false, false, true, false, false));
+         value.add(new Role("guest", false, true, false, false, false, false, false, true, false, false));
+         value.add(new Role("full", true, true, true, true, true, true, true, true, true, true));
          securityRepository.addMatch(getQueueName(), value);
 
          server.getConfiguration().setSecurityEnabled(true);
@@ -305,6 +313,10 @@ public class AmqpClientTestSupport extends AmqpTestSupport {
    }
 
    protected void sendMessages(String destinationName, int count, RoutingType routingType) throws Exception {
+      sendMessages(destinationName, count, routingType, false);
+   }
+
+   protected void sendMessages(String destinationName, int count, RoutingType routingType, boolean durable) throws Exception {
       AmqpClient client = createAmqpClient();
       AmqpConnection connection = addConnection(client.connect());
       try {
@@ -314,6 +326,7 @@ public class AmqpClientTestSupport extends AmqpTestSupport {
          for (int i = 0; i < count; ++i) {
             AmqpMessage message = new AmqpMessage();
             message.setMessageId("MessageID:" + i);
+            message.setDurable(durable);
             if (routingType != null) {
                message.setMessageAnnotation(AMQPMessageSupport.ROUTING_TYPE.toString(), routingType.getType());
             }
@@ -340,5 +353,49 @@ public class AmqpClientTestSupport extends AmqpTestSupport {
       } finally {
          connection.close();
       }
+   }
+
+   protected Source createDynamicSource(boolean topic) {
+
+      Source source = new Source();
+      source.setDynamic(true);
+      source.setDurable(TerminusDurability.NONE);
+      source.setExpiryPolicy(TerminusExpiryPolicy.LINK_DETACH);
+
+      // Set the dynamic node lifetime-policy
+      Map<Symbol, Object> dynamicNodeProperties = new HashMap<>();
+      dynamicNodeProperties.put(LIFETIME_POLICY, DeleteOnClose.getInstance());
+      source.setDynamicNodeProperties(dynamicNodeProperties);
+
+      // Set the capability to indicate the node type being created
+      if (!topic) {
+         source.setCapabilities(TEMP_QUEUE_CAPABILITY);
+      } else {
+         source.setCapabilities(TEMP_TOPIC_CAPABILITY);
+      }
+
+      return source;
+   }
+
+   protected Target createDynamicTarget(boolean topic) {
+
+      Target target = new Target();
+      target.setDynamic(true);
+      target.setDurable(TerminusDurability.NONE);
+      target.setExpiryPolicy(TerminusExpiryPolicy.LINK_DETACH);
+
+      // Set the dynamic node lifetime-policy
+      Map<Symbol, Object> dynamicNodeProperties = new HashMap<>();
+      dynamicNodeProperties.put(LIFETIME_POLICY, DeleteOnClose.getInstance());
+      target.setDynamicNodeProperties(dynamicNodeProperties);
+
+      // Set the capability to indicate the node type being created
+      if (!topic) {
+         target.setCapabilities(TEMP_QUEUE_CAPABILITY);
+      } else {
+         target.setCapabilities(TEMP_TOPIC_CAPABILITY);
+      }
+
+      return target;
    }
 }

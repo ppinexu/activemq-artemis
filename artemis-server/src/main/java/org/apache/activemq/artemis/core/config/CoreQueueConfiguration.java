@@ -33,7 +33,17 @@ public class CoreQueueConfiguration implements Serializable {
 
    private boolean durable = true;
 
-   private Integer maxConsumers = ActiveMQDefaultConfiguration.getDefaultMaxQueueConsumers();
+   private String user = null;
+
+   private Boolean exclusive;
+
+   private Boolean lastValue;
+
+   private Integer maxConsumers;
+
+   private Integer consumersBeforeDispatch;
+
+   private Long delayBeforeDispatch;
 
    private Boolean purgeOnNoConsumers = ActiveMQDefaultConfiguration.getDefaultPurgeOnNoConsumers();
 
@@ -56,6 +66,26 @@ public class CoreQueueConfiguration implements Serializable {
 
    public boolean isDurable() {
       return durable;
+   }
+
+   public String getUser() {
+      return user;
+   }
+
+   public Boolean isExclusive() {
+      return exclusive;
+   }
+
+   public Boolean isLastValue() {
+      return lastValue;
+   }
+
+   public Integer getConsumersBeforeDispatch() {
+      return consumersBeforeDispatch;
+   }
+
+   public Long getDelayBeforeDispatch() {
+      return delayBeforeDispatch;
    }
 
    /**
@@ -99,6 +129,22 @@ public class CoreQueueConfiguration implements Serializable {
    }
 
    /**
+    * @param consumersBeforeDispatch for this queue, default is 0 (dispatch as soon as 1 consumer)
+    */
+   public CoreQueueConfiguration setConsumersBeforeDispatch(Integer consumersBeforeDispatch) {
+      this.consumersBeforeDispatch = consumersBeforeDispatch;
+      return this;
+   }
+
+   /**
+    * @param delayBeforeDispatch for this queue, default is 0 (start dispatch with no delay)
+    */
+   public CoreQueueConfiguration setDelayBeforeDispatch(Long delayBeforeDispatch) {
+      this.delayBeforeDispatch = delayBeforeDispatch;
+      return this;
+   }
+
+   /**
     * @param purgeOnNoConsumers delete this queue when consumer count reaches 0, default is false
     */
    public CoreQueueConfiguration setPurgeOnNoConsumers(Boolean purgeOnNoConsumers) {
@@ -106,11 +152,29 @@ public class CoreQueueConfiguration implements Serializable {
       return this;
    }
 
+   /**
+    * @param user the use you want to associate with creating the queue
+    */
+   public CoreQueueConfiguration setUser(String user) {
+      this.user = user;
+      return this;
+   }
+
+   public CoreQueueConfiguration setExclusive(Boolean exclusive) {
+      this.exclusive = exclusive;
+      return this;
+   }
+
+   public CoreQueueConfiguration setLastValue(Boolean lastValue) {
+      this.lastValue = lastValue;
+      return this;
+   }
+
    public boolean getPurgeOnNoConsumers() {
       return purgeOnNoConsumers;
    }
 
-   public int getMaxConsumers() {
+   public Integer getMaxConsumers() {
       return maxConsumers;
    }
 
@@ -133,6 +197,10 @@ public class CoreQueueConfiguration implements Serializable {
       result = prime * result + ((name == null) ? 0 : name.hashCode());
       result = prime * result + ((maxConsumers == null) ? 0 : maxConsumers.hashCode());
       result = prime * result + ((purgeOnNoConsumers == null) ? 0 : purgeOnNoConsumers.hashCode());
+      result = prime * result + ((exclusive == null) ? 0 : exclusive.hashCode());
+      result = prime * result + ((lastValue == null) ? 0 : lastValue.hashCode());
+      result = prime * result + ((consumersBeforeDispatch == null) ? 0 : consumersBeforeDispatch.hashCode());
+      result = prime * result + ((delayBeforeDispatch == null) ? 0 : delayBeforeDispatch.hashCode());
       return result;
    }
 
@@ -171,6 +239,30 @@ public class CoreQueueConfiguration implements Serializable {
          if (other.purgeOnNoConsumers != null)
             return false;
       } else if (!purgeOnNoConsumers.equals(other.purgeOnNoConsumers)) {
+         return false;
+      }
+      if (exclusive == null) {
+         if (other.exclusive != null)
+            return false;
+      } else if (!exclusive.equals(other.exclusive)) {
+         return false;
+      }
+      if (lastValue == null) {
+         if (other.lastValue != null)
+            return false;
+      } else if (!lastValue.equals(other.lastValue)) {
+         return false;
+      }
+      if (consumersBeforeDispatch == null) {
+         if (other.consumersBeforeDispatch != null)
+            return false;
+      } else if (!consumersBeforeDispatch.equals(other.consumersBeforeDispatch)) {
+         return false;
+      }
+      if (delayBeforeDispatch == null) {
+         if (other.delayBeforeDispatch != null)
+            return false;
+      } else if (!delayBeforeDispatch.equals(other.delayBeforeDispatch)) {
          return false;
       }
       return true;

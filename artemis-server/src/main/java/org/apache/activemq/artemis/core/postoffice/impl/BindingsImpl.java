@@ -78,6 +78,11 @@ public final class BindingsImpl implements Bindings {
    }
 
    @Override
+   public MessageLoadBalancingType getMessageLoadBalancingType() {
+      return this.messageLoadBalancingType;
+   }
+
+   @Override
    public Collection<Binding> getBindings() {
       return bindingsMap.values();
    }
@@ -147,6 +152,11 @@ public final class BindingsImpl implements Bindings {
       if (logger.isTraceEnabled()) {
          logger.trace("Removing binding " + binding + " from " + this + " bindingTable: " + debugBindings());
       }
+   }
+
+   @Override
+   public boolean allowRedistribute() {
+      return messageLoadBalancingType.equals(MessageLoadBalancingType.ON_DEMAND);
    }
 
    @Override
@@ -248,7 +258,7 @@ public final class BindingsImpl implements Bindings {
                if (entry.getValue() instanceof RemoteQueueBinding) {
                   RemoteQueueBinding remoteQueueBinding = (RemoteQueueBinding) entry.getValue();
                   if (remoteQueueBinding.getRemoteQueueID() == id) {
-                     message.putBytesProperty(Message.HDR_ROUTE_TO_IDS, ByteBuffer.allocate(8).putLong(remoteQueueBinding.getID()).array());
+                     message.putExtraBytesProperty(Message.HDR_ROUTE_TO_IDS, ByteBuffer.allocate(8).putLong(remoteQueueBinding.getID()).array());
                   }
                }
             }

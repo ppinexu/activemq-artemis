@@ -149,7 +149,7 @@ public class ReplicatedJournal implements Journal {
                                             final Persister persister,
                                             final Object record) throws Exception {
       if (log.isTraceEnabled()) {
-         log.trace("Append record TXid = " + id + " recordType = " + recordType);
+         log.trace("Append record txID=" + id + " recordType = " + recordType);
       }
       replicationManager.appendAddRecordTransactional(journalID, ADD_OPERATION_TYPE.ADD, txID, id, recordType, persister, record);
       localJournal.appendAddRecordTransactional(txID, id, recordType, persister, record);
@@ -164,7 +164,7 @@ public class ReplicatedJournal implements Journal {
    @Override
    public void appendCommitRecord(final long txID, final boolean sync) throws Exception {
       if (log.isTraceEnabled()) {
-         log.trace("AppendCommit " + txID);
+         log.trace("AppendCommit txID=" + txID);
       }
       replicationManager.appendCommitRecord(journalID, txID, sync, true);
       localJournal.appendCommitRecord(txID, sync);
@@ -426,8 +426,9 @@ public class ReplicatedJournal implements Journal {
    @Override
    public JournalLoadInformation load(final List<RecordInfo> committedRecords,
                                       final List<PreparedTransactionInfo> preparedTransactions,
-                                      final TransactionFailureCallback transactionFailure) throws Exception {
-      return localJournal.load(committedRecords, preparedTransactions, transactionFailure);
+                                      final TransactionFailureCallback transactionFailure,
+                                      final boolean fixbadTX) throws Exception {
+      return localJournal.load(committedRecords, preparedTransactions, transactionFailure, fixbadTX);
    }
 
    /**
@@ -515,8 +516,8 @@ public class ReplicatedJournal implements Journal {
    }
 
    @Override
-   public void forceMoveNextFile() {
-      throw new UnsupportedOperationException();
+   public void forceMoveNextFile() throws Exception {
+      localJournal.forceMoveNextFile();
    }
 
    @Override
@@ -547,5 +548,10 @@ public class ReplicatedJournal implements Journal {
    @Override
    public void replicationSyncFinished() {
       throw new UnsupportedOperationException("should never get called");
+   }
+
+   @Override
+   public long getMaxRecordSize() {
+      return localJournal.getMaxRecordSize();
    }
 }

@@ -28,6 +28,7 @@ import java.util.Map.Entry;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -54,7 +55,6 @@ import org.apache.activemq.artemis.core.transaction.Transaction;
 import org.apache.activemq.artemis.core.transaction.TransactionOperationAbstract;
 import org.apache.activemq.artemis.core.transaction.TransactionPropertyIndexes;
 import org.apache.activemq.artemis.core.transaction.impl.TransactionImpl;
-import org.apache.activemq.artemis.utils.FutureLatch;
 import org.apache.activemq.artemis.utils.actors.ArtemisExecutor;
 import org.apache.activemq.artemis.utils.collections.ConcurrentHashSet;
 import org.jboss.logging.Logger;
@@ -95,6 +95,8 @@ final class PageSubscriptionImpl implements PageSubscription {
    private final ArtemisExecutor executor;
 
    private final AtomicLong deliveredCount = new AtomicLong(0);
+
+   private final AtomicLong deliveredSize = new AtomicLong(0);
 
    PageSubscriptionImpl(final PageCursorProvider cursorProvider,
                         final PagingStore pageStore,
@@ -178,6 +180,18 @@ final class PageSubscriptionImpl implements PageSubscription {
    }
 
    @Override
+   public long getPersistentSize() {
+      if (empty) {
+         return 0;
+      } else {
+         //A negative value could happen if an old journal was loaded that didn't have
+         //size metrics for old records
+         long messageSize = counter.getPersistentSize() - deliveredSize.get();
+         return messageSize > 0 ? messageSize : 0;
+      }
+   }
+
+   @Override
    public PageSubscriptionCounter getCounter() {
       return counter;
    }
@@ -195,7 +209,7 @@ final class PageSubscriptionImpl implements PageSubscription {
          return false;
       }
       // if the current page is complete, we must move it out of the way
-      if (pageStore != null && pageStore.getCurrentPage() != null &&
+      if (pageStore.getCurrentPage() != null &&
           pageStore.getCurrentPage().getPageId() == position.getPageNr()) {
          pageStore.forceAnotherPage();
       }
@@ -320,7 +334,9 @@ final class PageSubscriptionImpl implements PageSubscription {
          }
 
          infoPG.acks.clear();
+         infoPG.acks = Collections.synchronizedSet(new LinkedHashSet<PagePosition>());
          infoPG.removedReferences.clear();
+         infoPG.removedReferences = new ConcurrentHashSet<>();
       }
 
       tx.addOperation(new TransactionOperationAbstract() {
@@ -367,19 +383,29 @@ final class PageSubscriptionImpl implements PageSubscription {
 
       PageCache cache = cursorProvider.getPageCache(pos.getPageNr());
 
+      PageCache emptyCache = null;
       if (cache != null && !cache.isLive() && retPos.getMessageNr() >= cache.getNumberOfMessages()) {
+         emptyCache = cache;
+         saveEmptyPageAsConsumedPage(emptyCache);
          // The next message is beyond what's available at the current page, so we need to move to the next page
          cache = null;
       }
 
       // it will scan for the next available page
       while ((cache == null && retPos.getPageNr() <= pageStore.getCurrentWritingPage()) || (cache != null && retPos.getPageNr() <= pageStore.getCurrentWritingPage() && cache.getNumberOfMessages() == 0)) {
+         emptyCache = cache;
          retPos = moveNextPage(retPos);
 
          cache = cursorProvider.getPageCache(retPos.getPageNr());
+
+         if (cache != null) {
+            saveEmptyPageAsConsumedPage(emptyCache);
+         }
       }
 
       if (cache == null) {
+         saveEmptyPageAsConsumedPage(emptyCache);
+
          // it will be null in the case of the current writing page
          return null;
       } else {
@@ -439,7 +465,7 @@ final class PageSubscriptionImpl implements PageSubscription {
    public void ackTx(final Transaction tx, final PagedReference reference) throws Exception {
       confirmPosition(tx, reference.getPosition());
 
-      counter.increment(tx, -1);
+      counter.increment(tx, -1, -getPersistentSize(reference));
 
       PageTransactionInfo txInfo = getPageTransaction(reference);
       if (txInfo != null) {
@@ -689,9 +715,7 @@ final class PageSubscriptionImpl implements PageSubscription {
 
    @Override
    public void flushExecutors() {
-      FutureLatch future = new FutureLatch();
-      executor.execute(future);
-      while (!future.await(1000)) {
+      if (!executor.flush(10, TimeUnit.SECONDS)) {
          ActiveMQServerLogger.LOGGER.timedOutFlushingExecutorsPagingCursor(this);
       }
    }
@@ -725,7 +749,7 @@ final class PageSubscriptionImpl implements PageSubscription {
             try {
                store.deletePageComplete(completeInfo.getRecordID());
             } catch (Exception e) {
-               ActiveMQServerLogger.LOGGER.warn("Error while deleting page-complete-record", e);
+               ActiveMQServerLogger.LOGGER.errorDeletingPageCompleteRecord(e);
             }
             info.setCompleteInfo(null);
          }
@@ -734,7 +758,7 @@ final class PageSubscriptionImpl implements PageSubscription {
                try {
                   store.deleteCursorAcknowledge(deleteInfo.getRecordID());
                } catch (Exception e) {
-                  ActiveMQServerLogger.LOGGER.warn("Error while deleting page-complete-record", e);
+                  ActiveMQServerLogger.LOGGER.errorDeletingPageCompleteRecord(e);
                }
             }
          }
@@ -771,6 +795,17 @@ final class PageSubscriptionImpl implements PageSubscription {
          return pageInfo;
       }
 
+   }
+
+   private void saveEmptyPageAsConsumedPage(final PageCache cache) {
+      if (cache != null && cache.getNumberOfMessages() == 0) {
+         synchronized (consumedPages) {
+            PageCursorInfo pageInfo = consumedPages.get(cache.getPageId());
+            if (pageInfo == null) {
+               consumedPages.put(cache.getPageId(), new PageCursorInfo(cache.getPageId(), cache.getNumberOfMessages(), cache));
+            }
+         }
+      }
    }
 
    // Package protected ---------------------------------------------
@@ -831,6 +866,12 @@ final class PageSubscriptionImpl implements PageSubscription {
       }
 
       PageCursorInfo info = getPageInfo(position);
+      PageCache cache = info.getCache();
+      long size = 0;
+      if (cache != null) {
+         size = getPersistentSize(cache.getMessage(position.getMessageNr()));
+         position.setPersistentSize(size);
+      }
 
       logger.tracef("InstallTXCallback looking up pagePosition %s, result=%s", position, info);
 
@@ -849,8 +890,8 @@ final class PageSubscriptionImpl implements PageSubscription {
    }
 
    private PageTransactionInfo getPageTransaction(final PagedReference reference) throws ActiveMQException {
-      if (reference.getPagedMessage().getTransactionID() >= 0) {
-         return pageStore.getPagingManager().getTransaction(reference.getPagedMessage().getTransactionID());
+      if (reference.getTransactionID() >= 0) {
+         return pageStore.getPagingManager().getTransaction(reference.getTransactionID());
       } else {
          return null;
       }
@@ -883,11 +924,11 @@ final class PageSubscriptionImpl implements PageSubscription {
       private final long pageId;
 
       // Confirmed ACKs on this page
-      private final Set<PagePosition> acks = Collections.synchronizedSet(new LinkedHashSet<PagePosition>());
+      private Set<PagePosition> acks = Collections.synchronizedSet(new LinkedHashSet<PagePosition>());
 
       private WeakReference<PageCache> cache;
 
-      private final Set<PagePosition> removedReferences = new ConcurrentHashSet<>();
+      private Set<PagePosition> removedReferences = new ConcurrentHashSet<>();
 
       // The page was live at the time of the creation
       private final boolean wasLive;
@@ -1060,6 +1101,13 @@ final class PageSubscriptionImpl implements PageSubscription {
          }
       }
 
+      /**
+       * @return the cache
+       */
+      public PageCache getCache() {
+         return cache != null ? cache.get() : null;
+      }
+
    }
 
    private final class PageCursorTX extends TransactionOperationAbstract {
@@ -1087,6 +1135,7 @@ final class PageSubscriptionImpl implements PageSubscription {
             for (PagePosition confirmed : positions) {
                cursor.processACK(confirmed);
                cursor.deliveredCount.decrementAndGet();
+               cursor.deliveredSize.addAndGet(-confirmed.getPersistentSize());
             }
 
          }
@@ -1307,6 +1356,45 @@ final class PageSubscriptionImpl implements PageSubscription {
 
       @Override
       public void close() {
+      }
+   }
+
+   /**
+    * @return the deliveredCount
+    */
+   @Override
+   public long getDeliveredCount() {
+      return deliveredCount.get();
+   }
+
+   /**
+    * @return the deliveredSize
+    */
+   @Override
+   public long getDeliveredSize() {
+      return deliveredSize.get();
+   }
+
+   @Override
+   public void incrementDeliveredSize(long size) {
+      deliveredSize.addAndGet(size);
+   }
+
+   private long getPersistentSize(PagedMessage msg) {
+      try {
+         return msg != null && msg.getPersistentSize() > 0 ? msg.getPersistentSize() : 0;
+      } catch (ActiveMQException e) {
+         logger.warn("Error computing persistent size of message: " + msg, e);
+         return 0;
+      }
+   }
+
+   private long getPersistentSize(PagedReference ref) {
+      try {
+         return ref != null && ref.getPersistentSize() > 0 ? ref.getPersistentSize() : 0;
+      } catch (ActiveMQException e) {
+         logger.warn("Error computing persistent size of message: " + ref, e);
+         return 0;
       }
    }
 }

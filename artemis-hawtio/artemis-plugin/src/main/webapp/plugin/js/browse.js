@@ -20,6 +20,12 @@
 var ARTEMIS = (function(ARTEMIS) {
 
     ARTEMIS.BrowseQueueController = function ($scope, workspace, ARTEMISService, jolokia, localStorage, artemisMessage, $location, $timeout) {
+    $scope.pagingOptions = {
+          pageSizes: [50, 100, 200],
+          pageSize: 100,
+          currentPage: 1
+       };
+       $scope.totalServerItems = 0;
        $scope.searchText = '';
        $scope.allMessages = [];
        $scope.messages = [];
@@ -28,6 +34,10 @@ var ARTEMIS = (function(ARTEMIS) {
        $scope.deleteDialog = false;
        $scope.moveDialog = false;
        $scope.gridOptions = {
+          pagingOptions: $scope.pagingOptions,
+          enablePaging: true,
+          totalServerItems: 'totalServerItems',
+          showFooter: true,
           selectedItems: [],
           data: 'messages',
           displayFooter: false,
@@ -102,6 +112,15 @@ var ARTEMIS = (function(ARTEMIS) {
        $scope.$watch('gridOptions.filterOptions.filterText', function (filterText) {
           filterMessages(filterText);
        });
+       $scope.$watch('pagingOptions', function (newVal, oldVal) {
+          if (parseInt(newVal.currentPage) && newVal !== oldVal && newVal.currentPage !== oldVal.currentPage) {
+             loadTable();
+          }
+          if (parseInt(newVal.pageSize) && newVal !== oldVal && newVal.pageSize !== oldVal.pageSize) {
+             $scope.pagingOptions.currentPage = 1;
+             loadTable();
+          }
+       }, true);
        $scope.openMessageDialog = function (message) {
           ARTEMIS.selectCurrentMessage(message, "messageID", $scope);
           if ($scope.row) {
@@ -117,12 +136,10 @@ var ARTEMIS = (function(ARTEMIS) {
           if (mbean && selection) {
              var selectedItems = $scope.gridOptions.selectedItems;
              $scope.message = "Moved " + Core.maybePlural(selectedItems.length, "message" + " to " + $scope.queueName);
-             var operation = "moveMessageTo(java.lang.String, java.lang.String)";
              angular.forEach(selectedItems, function (item, idx) {
                 var id = item.messageID;
                 if (id) {
                    var callback = (idx + 1 < selectedItems.length) ? intermediateResult : moveSuccess;
-                   jolokia.execute(mbean, operation, id, $scope.queueName, onSuccess(callback));
                    ARTEMISService.artemisConsole.moveMessage(mbean, jolokia, id, $scope.queueName, onSuccess(callback));
                 }
              });
@@ -364,7 +381,8 @@ var ARTEMIS = (function(ARTEMIS) {
              else {
                 onDlq(false);
              }
-             ARTEMISService.artemisConsole.browse(objName, jolokia, onSuccess(populateTable));
+             jolokia.request({ type: 'exec', mbean: objName, operation: 'countMessages()'}, onSuccess(function(response) {$scope.totalServerItems = response.value;}));
+             jolokia.request({ type: 'exec', mbean: objName, operation: 'browse(int, int)', arguments: [$scope.pagingOptions.currentPage, $scope.pagingOptions.pageSize] }, onSuccess(populateTable));
           }
        }
 

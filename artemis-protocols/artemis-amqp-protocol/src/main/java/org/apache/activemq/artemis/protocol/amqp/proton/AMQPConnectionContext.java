@@ -16,6 +16,12 @@
  */
 package org.apache.activemq.artemis.protocol.amqp.proton;
 
+import static org.apache.activemq.artemis.protocol.amqp.proton.AmqpSupport.FAILOVER_SERVER_LIST;
+import static org.apache.activemq.artemis.protocol.amqp.proton.AmqpSupport.HOSTNAME;
+import static org.apache.activemq.artemis.protocol.amqp.proton.AmqpSupport.NETWORK_HOST;
+import static org.apache.activemq.artemis.protocol.amqp.proton.AmqpSupport.PORT;
+import static org.apache.activemq.artemis.protocol.amqp.proton.AmqpSupport.SCHEME;
+
 import java.net.URI;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -25,7 +31,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-import io.netty.buffer.ByteBuf;
 import org.apache.activemq.artemis.core.remoting.impl.netty.TransportConstants;
 import org.apache.activemq.artemis.protocol.amqp.broker.AMQPConnectionCallback;
 import org.apache.activemq.artemis.protocol.amqp.broker.AMQPSessionCallback;
@@ -35,11 +40,14 @@ import org.apache.activemq.artemis.protocol.amqp.proton.handler.EventHandler;
 import org.apache.activemq.artemis.protocol.amqp.proton.handler.ExtCapability;
 import org.apache.activemq.artemis.protocol.amqp.proton.handler.ProtonHandler;
 import org.apache.activemq.artemis.protocol.amqp.sasl.AnonymousServerSASL;
+import org.apache.activemq.artemis.protocol.amqp.sasl.ClientSASLFactory;
 import org.apache.activemq.artemis.protocol.amqp.sasl.SASLResult;
 import org.apache.activemq.artemis.spi.core.remoting.ReadyListener;
 import org.apache.activemq.artemis.utils.ByteUtil;
 import org.apache.activemq.artemis.utils.VersionLoader;
 import org.apache.qpid.proton.amqp.Symbol;
+import org.apache.qpid.proton.amqp.messaging.Source;
+import org.apache.qpid.proton.amqp.messaging.TerminusExpiryPolicy;
 import org.apache.qpid.proton.amqp.transaction.Coordinator;
 import org.apache.qpid.proton.amqp.transport.ErrorCondition;
 import org.apache.qpid.proton.engine.Connection;
@@ -51,11 +59,7 @@ import org.apache.qpid.proton.engine.Session;
 import org.apache.qpid.proton.engine.Transport;
 import org.jboss.logging.Logger;
 
-import static org.apache.activemq.artemis.protocol.amqp.proton.AmqpSupport.FAILOVER_SERVER_LIST;
-import static org.apache.activemq.artemis.protocol.amqp.proton.AmqpSupport.HOSTNAME;
-import static org.apache.activemq.artemis.protocol.amqp.proton.AmqpSupport.NETWORK_HOST;
-import static org.apache.activemq.artemis.protocol.amqp.proton.AmqpSupport.PORT;
-import static org.apache.activemq.artemis.protocol.amqp.proton.AmqpSupport.SCHEME;
+import io.netty.buffer.ByteBuf;
 
 public class AMQPConnectionContext extends ProtonInitializable implements EventHandler {
 
@@ -68,6 +72,8 @@ public class AMQPConnectionContext extends ProtonInitializable implements EventH
 
    protected AMQPConnectionCallback connectionCallback;
    private final String containerId;
+   private final boolean isIncomingConnection;
+   private final ClientSASLFactory saslClientFactory;
    private final Map<Symbol, Object> connectionProperties = new HashMap<>();
    private final ScheduledExecutorService scheduledPool;
 
@@ -84,19 +90,28 @@ public class AMQPConnectionContext extends ProtonInitializable implements EventH
                                 int maxFrameSize,
                                 int channelMax,
                                 boolean useCoreSubscriptionNaming,
-                                ScheduledExecutorService scheduledPool) {
+                                ScheduledExecutorService scheduledPool,
+                                boolean isIncomingConnection,
+                                ClientSASLFactory saslClientFactory,
+                                Map<Symbol, Object> connectionProperties) {
 
       this.protocolManager = protocolManager;
       this.connectionCallback = connectionSP;
       this.useCoreSubscriptionNaming = useCoreSubscriptionNaming;
       this.containerId = (containerId != null) ? containerId : UUID.randomUUID().toString();
+      this.isIncomingConnection = isIncomingConnection;
+      this.saslClientFactory = saslClientFactory;
 
-      connectionProperties.put(AmqpSupport.PRODUCT, "apache-activemq-artemis");
-      connectionProperties.put(AmqpSupport.VERSION, VersionLoader.getVersion().getFullVersion());
+      this.connectionProperties.put(AmqpSupport.PRODUCT, "apache-activemq-artemis");
+      this.connectionProperties.put(AmqpSupport.VERSION, VersionLoader.getVersion().getFullVersion());
+
+      if (connectionProperties != null) {
+         this.connectionProperties.putAll(connectionProperties);
+      }
 
       this.scheduledPool = scheduledPool;
       connectionCallback.setConnection(this);
-      this.handler = new ProtonHandler(protocolManager.getServer().getExecutorFactory().getExecutor());
+      this.handler = new ProtonHandler(protocolManager.getServer().getExecutorFactory().getExecutor(), isIncomingConnection);
       handler.addEventHandler(this);
       Transport transport = handler.getTransport();
       transport.setEmitFlowEventOnSend(false);
@@ -106,6 +121,22 @@ public class AMQPConnectionContext extends ProtonInitializable implements EventH
       transport.setChannelMax(channelMax);
       transport.setInitialRemoteMaxFrameSize(protocolManager.getInitialRemoteMaxFrameSize());
       transport.setMaxFrameSize(maxFrameSize);
+      transport.setOutboundFrameSizeLimit(maxFrameSize);
+      if (!isIncomingConnection && saslClientFactory != null) {
+         handler.createClientSASL();
+      }
+   }
+
+   public void scheduledFlush() {
+      handler.scheduledFlush();
+   }
+
+   public boolean isIncomingConnection() {
+      return isIncomingConnection;
+   }
+
+   public ClientSASLFactory getSaslClientFactory() {
+      return saslClientFactory;
    }
 
    protected AMQPSessionContext newSessionExtension(Session realSession) throws ActiveMQAMQPException {
@@ -232,7 +263,7 @@ public class AMQPConnectionContext extends ProtonInitializable implements EventH
       return ExtCapability.getCapabilities();
    }
 
-   public void open(Map<Symbol, Object> connectionProperties) {
+   public void open() {
       handler.open(containerId, connectionProperties);
    }
 
@@ -253,7 +284,7 @@ public class AMQPConnectionContext extends ProtonInitializable implements EventH
          return protocolManager.getAmqpLowCredits();
       } else {
          // this is for tests only...
-         return 30;
+         return AmqpSupport.AMQP_LOW_CREDITS_DEFAULT;
       }
    }
 
@@ -262,62 +293,12 @@ public class AMQPConnectionContext extends ProtonInitializable implements EventH
          return protocolManager.getAmqpCredits();
       } else {
          // this is for tests only...
-         return 100;
+         return AmqpSupport.AMQP_CREDITS_DEFAULT;
       }
    }
 
    public boolean isUseCoreSubscriptionNaming() {
       return useCoreSubscriptionNaming;
-   }
-
-   @Override
-   public void onInit(Connection connection) throws Exception {
-
-   }
-
-   @Override
-   public void onLocalOpen(Connection connection) throws Exception {
-
-   }
-
-   @Override
-   public void onLocalClose(Connection connection) throws Exception {
-
-   }
-
-   @Override
-   public void onFinal(Connection connection) throws Exception {
-
-   }
-
-   @Override
-   public void onInit(Session session) throws Exception {
-
-   }
-
-   @Override
-   public void onFinal(Session session) throws Exception {
-
-   }
-
-   @Override
-   public void onInit(Link link) throws Exception {
-
-   }
-
-   @Override
-   public void onLocalOpen(Link link) throws Exception {
-
-   }
-
-   @Override
-   public void onLocalClose(Link link) throws Exception {
-
-   }
-
-   @Override
-   public void onFinal(Link link) throws Exception {
-
    }
 
    @Override
@@ -341,6 +322,24 @@ public class AMQPConnectionContext extends ProtonInitializable implements EventH
    @Override
    public void onSaslRemoteMechanismChosen(ProtonHandler handler, String mech) {
       handler.setChosenMechanism(connectionCallback.getServerSASL(mech));
+   }
+
+   @Override
+   public void onSaslMechanismsOffered(final ProtonHandler handler, final String[] mechanisms) {
+      if (saslClientFactory != null) {
+         handler.setClientMechanism(saslClientFactory.chooseMechanism(mechanisms));
+      }
+   }
+
+   @Override
+   public void onAuthFailed(final ProtonHandler protonHandler, final Connection connection) {
+      connectionCallback.close();
+      handler.close(null);
+   }
+
+   @Override
+   public void onAuthSuccess(final ProtonHandler protonHandler, final Connection connection) {
+      connection.open();
    }
 
    @Override
@@ -391,8 +390,11 @@ public class AMQPConnectionContext extends ProtonInitializable implements EventH
             scheduledPool.schedule(new Runnable() {
                @Override
                public void run() {
-                  long rescheduleAt = handler.tick(false);
-                  if (rescheduleAt != 0) {
+                  Long rescheduleAt = handler.tick(false);
+                  if (rescheduleAt == null) {
+                     // this mean tick could not acquire a lock, we will just retry in 10 milliseconds.
+                     scheduledPool.schedule(this, 10, TimeUnit.MILLISECONDS);
+                  } else if (rescheduleAt != 0) {
                      scheduledPool.schedule(this, rescheduleAt - TimeUnit.NANOSECONDS.toMillis(System.nanoTime()), TimeUnit.MILLISECONDS);
                   }
                }
@@ -435,10 +437,6 @@ public class AMQPConnectionContext extends ProtonInitializable implements EventH
       } finally {
          unlock();
       }
-   }
-
-   @Override
-   public void onLocalClose(Session session) throws Exception {
    }
 
    @Override
@@ -489,12 +487,19 @@ public class AMQPConnectionContext extends ProtonInitializable implements EventH
 
    @Override
    public void onRemoteDetach(Link link) throws Exception {
-      lock();
-      try {
-         link.detach();
-         link.free();
-      } finally {
-         unlock();
+      boolean handleAsClose = link.getSource() != null
+                              && ((Source) link.getSource()).getExpiryPolicy() == TerminusExpiryPolicy.LINK_DETACH;
+
+      if (handleAsClose) {
+         onRemoteClose(link);
+      } else {
+         lock();
+         try {
+            link.detach();
+            link.free();
+         } finally {
+            unlock();
+         }
       }
    }
 

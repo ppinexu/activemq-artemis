@@ -281,10 +281,18 @@ public class JDBCSequentialFile implements SequentialFile {
       return readPosition;
    }
 
+
    @Override
    public void close() throws Exception {
+      close(true);
+   }
+
+   @Override
+   public void close(boolean waitOnSync) throws Exception {
       isOpen.set(false);
-      sync();
+      if (waitOnSync) {
+         sync();
+      }
       fileFactory.sequentialFileClosed(this);
    }
 
@@ -322,6 +330,7 @@ public class JDBCSequentialFile implements SequentialFile {
    public SequentialFile cloneFile() {
       try {
          JDBCSequentialFile clone = new JDBCSequentialFile(fileFactory, filename, executor, dbDriver, writeLock);
+         clone.setWritePosition(this.writePosition);
          return clone;
       } catch (Exception e) {
          fileFactory.onIOError(e, "Error cloning JDBC file.", this);
@@ -334,8 +343,13 @@ public class JDBCSequentialFile implements SequentialFile {
       JDBCSequentialFile clone = (JDBCSequentialFile) cloneFile;
       try {
          synchronized (writeLock) {
+            if (logger.isTraceEnabled()) {
+               logger.trace("JDBC Copying File.  From: " + this + " To: " + cloneFile);
+            }
+
             clone.open();
             dbDriver.copyFileData(this, clone);
+            clone.setWritePosition(writePosition);
          }
       } catch (Exception e) {
          fileFactory.onIOError(e, "Error copying JDBC file.", this);

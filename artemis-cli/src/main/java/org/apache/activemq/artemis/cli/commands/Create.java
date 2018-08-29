@@ -38,6 +38,7 @@ import java.util.regex.Pattern;
 import io.airlift.airline.Arguments;
 import io.airlift.airline.Command;
 import io.airlift.airline.Option;
+import org.apache.activemq.artemis.api.config.ActiveMQDefaultConfiguration;
 import org.apache.activemq.artemis.cli.CLIException;
 import org.apache.activemq.artemis.cli.commands.util.HashUtil;
 import org.apache.activemq.artemis.cli.commands.util.SyncCalculation;
@@ -75,17 +76,18 @@ public class Create extends InputAbstract {
    public static final String BIN_ARTEMIS_CMD = "bin/artemis.cmd";
    public static final String BIN_ARTEMIS_SERVICE_EXE = "bin/artemis-service.exe";
    public static final String BIN_ARTEMIS_SERVICE_XML = "bin/artemis-service.xml";
-   public static final String ETC_ARTEMIS_PROFILE_CMD = "etc/artemis.profile.cmd";
+   public static final String ETC_ARTEMIS_PROFILE_CMD = "artemis.profile.cmd";
    public static final String BIN_ARTEMIS = "bin/artemis";
    public static final String BIN_ARTEMIS_SERVICE = "bin/artemis-service";
-   public static final String ETC_ARTEMIS_PROFILE = "etc/artemis.profile";
-   public static final String ETC_LOGGING_PROPERTIES = "etc/logging.properties";
-   public static final String ETC_BOOTSTRAP_XML = "etc/bootstrap.xml";
-   public static final String ETC_BROKER_XML = "etc/broker.xml";
+   public static final String ETC_ARTEMIS_PROFILE = "artemis.profile";
+   public static final String ETC_LOGGING_PROPERTIES = "logging.properties";
+   public static final String ETC_BOOTSTRAP_XML = "bootstrap.xml";
+   public static final String ETC_MANAGEMENT_XML = "management.xml";
+   public static final String ETC_BROKER_XML = "broker.xml";
 
-   public static final String ETC_ARTEMIS_ROLES_PROPERTIES = "etc/artemis-roles.properties";
-   public static final String ETC_ARTEMIS_USERS_PROPERTIES = "etc/artemis-users.properties";
-   private static final String ETC_LOGIN_CONFIG = "etc/login.config";
+   public static final String ETC_ARTEMIS_ROLES_PROPERTIES = "artemis-roles.properties";
+   public static final String ETC_ARTEMIS_USERS_PROPERTIES = "artemis-users.properties";
+   private static final String ETC_LOGIN_CONFIG = "login.config";
    private static final String ETC_LOGIN_CONFIG_WITH_GUEST = "etc/login-with-guest.config";
    private static final String ETC_LOGIN_CONFIG_WITHOUT_GUEST = "etc/login-without-guest.config";
    public static final String ETC_REPLICATED_SETTINGS_TXT = "etc/replicated-settings.txt";
@@ -101,9 +103,11 @@ public class Create extends InputAbstract {
    public static final String ETC_STOMP_ACCEPTOR_TXT = "etc/stomp-acceptor.txt";
    public static final String ETC_PING_TXT = "etc/ping-settings.txt";
    public static final String ETC_COMMENTED_PING_TXT = "etc/commented-ping-settings.txt";
+   public static final String ETC_DATABASE_STORE_TXT = "etc/database-store.txt";
 
    public static final String ETC_GLOBAL_MAX_SPECIFIED_TXT = "etc/global-max-specified.txt";
    public static final String ETC_GLOBAL_MAX_DEFAULT_TXT = "etc/global-max-default.txt";
+   public static final String ETC_JOLOKIA_ACCESS_XML = "jolokia-access.xml";
 
    @Arguments(description = "The instance directory to hold the broker's configuration and data.  Path must be writable.", required = true)
    private File directory;
@@ -150,8 +154,11 @@ public class Create extends InputAbstract {
    @Option(name = "--home", description = "Directory where ActiveMQ Artemis is installed")
    private File home;
 
-   @Option(name = "--data", description = "Directory where ActiveMQ Data is used. Paths are relative to artemis.instance")
-   private String data = "./data";
+   @Option(name = "--data", description = "Directory where ActiveMQ data are stored. Paths can be absolute or relative to artemis.instance directory ('data' by default)")
+   private String data = "data";
+
+   @Option(name = "--etc", description = "Directory where ActiveMQ configuration is located. Paths can be absolute or relative to artemis.instance directory ('etc' by default)")
+   private String etc = "etc";
 
    @Option(name = "--clustered", description = "Enable clustering")
    private boolean clustered = false;
@@ -258,6 +265,40 @@ public class Create extends InputAbstract {
    @Option(name = "--global-max-size", description = "Maximum amount of memory which message data may consume (Default: Undefined, half of the system's memory)")
    private String globalMaxSize;
 
+
+   @Option(name = "--jdbc", description = "It will activate jdbc")
+   boolean jdbc;
+
+   @Option(name = "--jdbc-bindings-table-name", description = "Name of the jdbc bindigns table")
+   private String jdbcBindings = ActiveMQDefaultConfiguration.getDefaultBindingsTableName();
+
+   @Option(name = "--jdbc-message-table-name", description = "Name of the jdbc messages table")
+   private String jdbcMessages = ActiveMQDefaultConfiguration.getDefaultMessageTableName();
+
+   @Option(name = "--jdbc-large-message-table-name", description = "Name of the large messages table")
+   private String jdbcLargeMessages = ActiveMQDefaultConfiguration.getDefaultLargeMessagesTableName();
+
+   @Option(name = "--jdbc-page-store-table-name", description = "Name of the page store messages table")
+   private String jdbcPageStore = ActiveMQDefaultConfiguration.getDefaultPageStoreTableName();
+
+   @Option(name = "--jdbc-node-manager-table-name", description = "Name of the jdbc node manager table")
+   private String jdbcNodeManager = ActiveMQDefaultConfiguration.getDefaultNodeManagerStoreTableName();
+
+   @Option(name = "--jdbc-connection-url", description = "The connection used for the database")
+   private String jdbcURL = null;
+
+   @Option(name = "--jdbc-driver-class-name", description = "JDBC driver classname")
+   private String jdbcClassName = ActiveMQDefaultConfiguration.getDefaultDriverClassName();
+
+   @Option(name = "--jdbc-network-timeout", description = "Network timeout")
+   long jdbcNetworkTimeout = ActiveMQDefaultConfiguration.getDefaultJdbcNetworkTimeout();
+
+   @Option(name = "--jdbc-lock-renew-period", description = "Lock Renew Period")
+   long jdbcLockRenewPeriod = ActiveMQDefaultConfiguration.getDefaultJdbcLockRenewPeriodMillis();
+
+   @Option(name = "--jdbc-lock-expiration", description = "Lock expiration")
+   long jdbcLockExpiration = ActiveMQDefaultConfiguration.getDefaultJdbcLockExpirationMillis();
+
    private boolean IS_WINDOWS;
    private boolean IS_CYGWIN;
 
@@ -347,6 +388,14 @@ public class Create extends InputAbstract {
 
    public void setData(String data) {
       this.data = data;
+   }
+
+   public String getEtc() {
+      return etc;
+   }
+
+   public void setEtc(String etc) {
+      this.etc = etc;
    }
 
    private String getClusterUser() {
@@ -470,6 +519,15 @@ public class Create extends InputAbstract {
       }
    }
 
+   private File createDirectory(String name, File root) {
+      File directory = new File(name);
+      if (!directory.isAbsolute()) {
+         directory = new File(root, name);
+      }
+      directory.mkdirs();
+      return directory;
+   }
+
    public Object run(ActionContext context) throws Exception {
 
       IS_WINDOWS = System.getProperty("os.name").toLowerCase().trim().startsWith("win");
@@ -554,6 +612,25 @@ public class Create extends InputAbstract {
          filters.put("${global-max-section}", readTextFile(ETC_GLOBAL_MAX_SPECIFIED_TXT, filters));
       }
 
+      if (jdbc) {
+         if (jdbcURL == null) {
+            jdbcURL = "jdbc:derby:" + getInstance().getAbsolutePath() + "/data/derby/db;create=true";
+         }
+         filters.put("${jdbcBindings}", jdbcBindings);
+         filters.put("${jdbcMessages}", jdbcMessages);
+         filters.put("${jdbcLargeMessages}", jdbcLargeMessages);
+         filters.put("${jdbcPageStore}", jdbcPageStore);
+         filters.put("${jdbcNodeManager}", jdbcNodeManager);
+         filters.put("${jdbcURL}", jdbcURL);
+         filters.put("${jdbcClassName}", jdbcClassName);
+         filters.put("${jdbcNetworkTimeout}", "" + jdbcNetworkTimeout);
+         filters.put("${jdbcLockRenewPeriod}", "" + jdbcLockRenewPeriod);
+         filters.put("${jdbcLockExpiration}", "" + jdbcLockExpiration);
+         filters.put("${jdbc}", readTextFile(ETC_DATABASE_STORE_TXT, filters));
+      } else {
+         filters.put("${jdbc}", "");
+      }
+
 
       if (clustered) {
          filters.put("${host}", getHostForClustered());
@@ -594,12 +671,15 @@ public class Create extends InputAbstract {
       filters.put("${java.home}", path(System.getProperty("java.home")));
 
       new File(directory, "bin").mkdirs();
-      new File(directory, "etc").mkdirs();
+      File etcFolder = createDirectory(etc, directory);
+      filters.put("${artemis.instance.etc.uri}", etcFolder.toURI().toString());
+      filters.put("${artemis.instance.etc.uri.windows}", etcFolder.toURI().toString().replaceAll("%", "%%"));
+      filters.put("${artemis.instance.etc}", path(etcFolder));
       new File(directory, "log").mkdirs();
       new File(directory, "tmp").mkdirs();
       new File(directory, "lib").mkdirs();
-      File dataFolder = new File(directory, "data");
-      dataFolder.mkdirs();
+      File dataFolder = createDirectory(data, directory);
+      filters.put("${artemis.instance.data}", path(dataFolder));
 
       filters.put("${logmanager}", getLogManager());
 
@@ -610,20 +690,18 @@ public class Create extends InputAbstract {
       filters.put("${java-opts}", javaOptions);
 
       if (isAllowAnonymous()) {
-         write(ETC_LOGIN_CONFIG_WITH_GUEST, filters, false);
-         new File(directory, ETC_LOGIN_CONFIG_WITH_GUEST).renameTo(new File(directory, ETC_LOGIN_CONFIG));
+         write(ETC_LOGIN_CONFIG_WITH_GUEST, new File(etcFolder, ETC_LOGIN_CONFIG), filters, false);
       } else {
-         write(ETC_LOGIN_CONFIG_WITHOUT_GUEST, filters, false);
-         new File(directory, ETC_LOGIN_CONFIG_WITHOUT_GUEST).renameTo(new File(directory, ETC_LOGIN_CONFIG));
+         write(ETC_LOGIN_CONFIG_WITHOUT_GUEST, new File(etcFolder, ETC_LOGIN_CONFIG), filters, false);
       }
 
-      write(ETC_ARTEMIS_ROLES_PROPERTIES, filters, false);
+      writeEtc(ETC_ARTEMIS_ROLES_PROPERTIES, etcFolder, filters, false);
 
       if (IS_WINDOWS) {
-         write(BIN_ARTEMIS_CMD, null, false);
+         write(BIN_ARTEMIS_CMD, filters, false);
          write(BIN_ARTEMIS_SERVICE_EXE);
          write(BIN_ARTEMIS_SERVICE_XML, filters, false);
-         write(ETC_ARTEMIS_PROFILE_CMD, filters, false);
+         writeEtc(ETC_ARTEMIS_PROFILE_CMD, etcFolder, filters, false);
       }
 
       if (!IS_WINDOWS || IS_CYGWIN) {
@@ -631,10 +709,10 @@ public class Create extends InputAbstract {
          makeExec(BIN_ARTEMIS);
          write(BIN_ARTEMIS_SERVICE, filters, true);
          makeExec(BIN_ARTEMIS_SERVICE);
-         write(ETC_ARTEMIS_PROFILE, filters, true);
+         writeEtc(ETC_ARTEMIS_PROFILE, etcFolder, filters, true);
       }
 
-      write(ETC_LOGGING_PROPERTIES, null, false);
+      writeEtc(ETC_LOGGING_PROPERTIES, etcFolder, null, false);
 
       if (noWeb) {
          filters.put("${bootstrap-web-settings}", "");
@@ -679,14 +757,23 @@ public class Create extends InputAbstract {
 
       filters.put("${auto-create}", isAutoCreate() ? "true" : "false");
 
+      if (jdbc) {
+         noAutoTune = true;
+         System.out.println();
+         printStar("Copy a jar containing the JDBC Driver '" + jdbcClassName + "' into " + directory.getAbsolutePath() + "/lib");
+         System.out.println();
+      }
+
       performAutoTune(filters, journalType, dataFolder);
 
-      write(ETC_BROKER_XML, filters, false);
-      write(ETC_ARTEMIS_USERS_PROPERTIES, filters, false);
+      writeEtc(ETC_BROKER_XML, etcFolder, filters, false);
+      writeEtc(ETC_ARTEMIS_USERS_PROPERTIES, etcFolder, filters, false);
 
       // we want this variable to remain unchanged so that it will use the value set in the profile
       filters.remove("${artemis.instance}");
-      write(ETC_BOOTSTRAP_XML, filters, false);
+      writeEtc(ETC_BOOTSTRAP_XML, etcFolder, filters, false);
+      writeEtc(ETC_MANAGEMENT_XML, etcFolder, filters, false);
+      writeEtc(ETC_JOLOKIA_ACCESS_XML, etcFolder, filters, false);
 
       context.out.println("");
       context.out.println("You can now start the broker by executing:  ");
@@ -720,7 +807,30 @@ public class Create extends InputAbstract {
       return null;
    }
 
+   private void printStar(String message) {
+      int size = Math.min(message.length(), 80);
+      StringBuffer buffer = new StringBuffer(size);
+      for (int i = 0; i < size; i++) {
+         buffer.append("*");
+      }
+      System.out.println(buffer.toString());
+      System.out.println();
+      System.out.println(message);
+      System.out.println();
+      System.out.println(buffer.toString());
+   }
+
    private void setupJournalType() {
+
+      if (noJournalSync && !mapped) {
+         boolean useMapped = inputBoolean("--mapped", "Since you disabled syncs, it is recommended to use the Mapped Memory Journal. Do you want to use the Memory Mapped Journal", true);
+
+         if (useMapped) {
+            mapped = true;
+            nio = false;
+            aio = false;
+         }
+      }
       int countJournalTypes = countBoolean(aio, nio, mapped);
       if (countJournalTypes > 1) {
          throw new RuntimeException("You can only select one journal type (--nio | --aio | --mapped).");
@@ -801,20 +911,34 @@ public class Create extends InputAbstract {
             System.out.println("");
             System.out.println("Auto tuning journal ...");
 
-            long time = SyncCalculation.syncTest(dataFolder, 4096, writes, 5, verbose, !noJournalSync, journalType);
-            long nanoseconds = SyncCalculation.toNanos(time, writes, verbose);
-            double writesPerMillisecond = (double) writes / (double) time;
+            if (mapped && noJournalSync) {
+               HashMap<String, String> syncFilter = new HashMap<>();
+               syncFilter.put("${nanoseconds}", "0");
+               syncFilter.put("${writesPerMillisecond}", "0");
+               syncFilter.put("${maxaio}", journalType == JournalType.ASYNCIO ? "" + ActiveMQDefaultConfiguration.getDefaultJournalMaxIoAio() : "1");
 
-            String writesPerMillisecondStr = new DecimalFormat("###.##").format(writesPerMillisecond);
+               System.out.println("...Since you disabled sync and are using MAPPED journal, we are diabling buffer times");
 
-            HashMap<String, String> syncFilter = new HashMap<>();
-            syncFilter.put("${nanoseconds}", Long.toString(nanoseconds));
-            syncFilter.put("${writesPerMillisecond}", writesPerMillisecondStr);
+               filters.put("${journal-buffer.settings}", readTextFile(ETC_JOURNAL_BUFFER_SETTINGS, syncFilter));
 
-            System.out.println("done! Your system can make " + writesPerMillisecondStr +
-                                  " writes per millisecond, your journal-buffer-timeout will be " + nanoseconds);
+            } else {
+               long time = SyncCalculation.syncTest(dataFolder, 4096, writes, 5, verbose, !noJournalSync, false, "journal-test.tmp", ActiveMQDefaultConfiguration.getDefaultJournalMaxIoAio(), journalType);
+               long nanoseconds = SyncCalculation.toNanos(time, writes, verbose);
+               double writesPerMillisecond = (double) writes / (double) time;
 
-            filters.put("${journal-buffer.settings}", readTextFile(ETC_JOURNAL_BUFFER_SETTINGS, syncFilter));
+               String writesPerMillisecondStr = new DecimalFormat("###.##").format(writesPerMillisecond);
+
+               HashMap<String, String> syncFilter = new HashMap<>();
+               syncFilter.put("${nanoseconds}", Long.toString(nanoseconds));
+               syncFilter.put("${writesPerMillisecond}", writesPerMillisecondStr);
+               syncFilter.put("${maxaio}", journalType == JournalType.ASYNCIO ? "" + ActiveMQDefaultConfiguration.getDefaultJournalMaxIoAio() : "1");
+
+               System.out.println("done! Your system can make " + writesPerMillisecondStr +
+                                     " writes per millisecond, your journal-buffer-timeout will be " + nanoseconds);
+
+               filters.put("${journal-buffer.settings}", readTextFile(ETC_JOURNAL_BUFFER_SETTINGS, syncFilter));
+            }
+
 
          } catch (Exception e) {
             filters.put("${journal-buffer.settings}", "");
@@ -881,6 +1005,10 @@ public class Create extends InputAbstract {
       write(source, new File(directory, source), filters, unixTarget);
    }
 
+   private void writeEtc(String source, File etcFolder, HashMap<String, String> filters, boolean unixTarget) throws Exception {
+      write("etc/" + source, new File(etcFolder, source), filters, unixTarget);
+   }
+
    private void write(String source,
                       File target,
                       HashMap<String, String> filters,
@@ -896,7 +1024,6 @@ public class Create extends InputAbstract {
       String separator = unixTarget && IS_CYGWIN ? "\n" : System.getProperty("line.separator");
       content = content.replaceAll("\\r?\\n", Matcher.quoteReplacement(separator));
       ByteArrayInputStream in = new ByteArrayInputStream(content.getBytes(encoding));
-
       try (FileOutputStream fout = new FileOutputStream(target)) {
          copy(in, fout);
       }
@@ -906,7 +1033,13 @@ public class Create extends InputAbstract {
 
       if (filters != null) {
          for (Map.Entry<String, String> entry : filters.entrySet()) {
-            content = replace(content, entry.getKey(), entry.getValue());
+            try {
+               content = replace(content, entry.getKey(), entry.getValue());
+            } catch (Throwable e) {
+               System.out.println("Error on " + entry.getKey());
+               e.printStackTrace();
+               System.exit(-1);
+            }
          }
       }
       return content;

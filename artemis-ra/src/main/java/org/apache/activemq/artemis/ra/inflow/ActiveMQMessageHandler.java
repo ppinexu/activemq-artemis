@@ -111,7 +111,7 @@ public class ActiveMQMessageHandler implements MessageHandler, FailoverEventList
       // Create the message consumer
       SimpleString selectorString = selector == null || selector.trim().equals("") ? null : new SimpleString(selector);
       if (activation.isTopic() && spec.isSubscriptionDurable()) {
-         SimpleString queueName = new SimpleString(ActiveMQDestination.createQueueNameForSubscription(true, spec.getClientID(), spec.getSubscriptionName()));
+         SimpleString queueName = ActiveMQDestination.createQueueNameForSubscription(true, spec.getClientID(), spec.getSubscriptionName());
 
          QueueQuery subResponse = session.queueQuery(queueName);
 
@@ -122,19 +122,15 @@ public class ActiveMQMessageHandler implements MessageHandler, FailoverEventList
             // As a deployed MDB could set up multiple instances in order to process messages in parallel.
             if (sessionNr == 0 && subResponse.getConsumerCount() > 0) {
                if (!spec.isShareSubscriptions()) {
-                  throw new javax.jms.IllegalStateException("Cannot create a subscriber on the durable subscription since it already has subscriber(s)");
+                  throw ActiveMQRALogger.LOGGER.canNotCreatedNonSharedSubscriber();
                } else if (ActiveMQRALogger.LOGGER.isDebugEnabled()) {
-                  logger.debug("the mdb on destination " + queueName + " already had " +
-                                                   subResponse.getConsumerCount() +
-                                                   " consumers but the MDB is configured to share subscriptions, so no exceptions are thrown");
+                  logger.debug("the mdb on destination " + queueName + " already had " + subResponse.getConsumerCount() + " consumers but the MDB is configured to share subscriptions, so no exceptions are thrown");
                }
             }
 
             SimpleString oldFilterString = subResponse.getFilterString();
 
-            boolean selectorChanged = selector == null && oldFilterString != null ||
-               oldFilterString == null && selector != null ||
-               (oldFilterString != null && selector != null && !oldFilterString.toString().equals(selector));
+            boolean selectorChanged = selector == null && oldFilterString != null || oldFilterString == null && selector != null || (oldFilterString != null && selector != null && !oldFilterString.toString().equals(selector));
 
             SimpleString oldTopicName = subResponse.getAddress();
 
@@ -196,6 +192,14 @@ public class ActiveMQMessageHandler implements MessageHandler, FailoverEventList
 
    XAResource getXAResource() {
       return useXA ? session : null;
+   }
+
+   public Thread getCurrentThread() {
+      if (consumer == null) {
+         return null;
+      }
+
+      return consumer.getCurrentThread();
    }
 
    public Thread interruptConsumer(FutureLatch future) {
@@ -278,6 +282,8 @@ public class ActiveMQMessageHandler implements MessageHandler, FailoverEventList
       }
 
       ActiveMQMessage msg = ActiveMQMessage.createMessage(message, session, options);
+      msg.setEnable1xPrefixes(activation.getConnectionFactory().isEnable1xPrefixes());
+
       boolean beforeDelivery = false;
 
       try {
@@ -286,7 +292,7 @@ public class ActiveMQMessageHandler implements MessageHandler, FailoverEventList
          }
 
          if (logger.isTraceEnabled()) {
-            logger.trace("HornetQMessageHandler::calling beforeDelivery on message " + message);
+            logger.trace("ActiveMQMessageHandler::calling beforeDelivery on message " + message);
          }
 
          endpoint.beforeDelivery(ActiveMQActivation.ONMESSAGE);
@@ -306,7 +312,7 @@ public class ActiveMQMessageHandler implements MessageHandler, FailoverEventList
          }
 
          if (logger.isTraceEnabled()) {
-            logger.trace("HornetQMessageHandler::calling afterDelivery on message " + message);
+            logger.trace("ActiveMQMessageHandler::calling afterDelivery on message " + message);
          }
 
          try {

@@ -37,6 +37,7 @@ import javax.jms.TopicPublisher;
 import org.apache.activemq.artemis.api.core.ActiveMQException;
 import org.apache.activemq.artemis.api.core.ActiveMQInterruptedException;
 import org.apache.activemq.artemis.api.core.ActiveMQQueueExistsException;
+import org.apache.activemq.artemis.api.core.QueueAttributes;
 import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.api.core.client.ClientMessage;
 import org.apache.activemq.artemis.api.core.client.ClientProducer;
@@ -412,7 +413,7 @@ public class ActiveMQMessageProducer implements MessageProducer, QueueSender, To
                         // TODO is it right to use the address for the queue name here?
                         clientSession.createTemporaryQueue(address, RoutingType.ANYCAST, address);
                      } else {
-                        clientSession.createQueue(address, RoutingType.ANYCAST, address, null, true, true, query.getDefaultMaxConsumers(), query.isDefaultPurgeOnNoConsumers());
+                        createQueue(destination, RoutingType.ANYCAST, address, null, true, true, query.getDefaultMaxConsumers(), query.isDefaultPurgeOnNoConsumers(), query.isDefaultExclusive(), query.isDefaultLastValueQueue());
                      }
                   } else if (!destination.isQueue() && query.isAutoCreateAddresses()) {
                      clientSession.createAddress(address, RoutingType.MULTICAST, true);
@@ -420,7 +421,16 @@ public class ActiveMQMessageProducer implements MessageProducer, QueueSender, To
                      throw new InvalidDestinationException("Destination " + address + " does not exist");
                   }
                } else {
-                  connection.addKnownDestination(address);
+                  ClientSession.QueueQuery queueQuery = clientSession.queueQuery(address);
+                  if (queueQuery.isExists()) {
+                     connection.addKnownDestination(address);
+                  } else if (destination.isQueue() && query.isAutoCreateQueues()) {
+                     if (destination.isTemporary()) {
+                        clientSession.createTemporaryQueue(address, RoutingType.ANYCAST, address);
+                     } else {
+                        createQueue(destination, RoutingType.ANYCAST, address, null, true, true, query.getDefaultMaxConsumers(), query.isDefaultPurgeOnNoConsumers(), query.isDefaultExclusive(), query.isDefaultLastValueQueue());
+                     }
+                  }
                }
             } catch (ActiveMQQueueExistsException e) {
                // The queue was created by another client/admin between the query check and send create queue packet
@@ -525,6 +535,27 @@ public class ActiveMQMessageProducer implements MessageProducer, QueueSender, To
          throw new IllegalStateException("Producer is closed");
       }
    }
+
+   private void createQueue(ActiveMQDestination destination, RoutingType routingType, SimpleString queueName, SimpleString filter, boolean durable, boolean autoCreated, int maxConsumers, boolean purgeOnNoConsumers, Boolean exclusive, Boolean lastValue) throws ActiveMQException {
+      QueueAttributes queueAttributes = destination.getQueueAttributes();
+      if (queueAttributes == null) {
+         clientSession.createQueue(destination.getSimpleAddress(), routingType, queueName, filter, durable, autoCreated, maxConsumers, purgeOnNoConsumers, exclusive, lastValue);
+      } else {
+         clientSession.createQueue(
+            destination.getSimpleAddress(),
+            routingType,
+            queueName,
+            filter,
+            durable,
+            autoCreated,
+            queueAttributes.getMaxConsumers() == null ? maxConsumers : queueAttributes.getMaxConsumers(),
+            queueAttributes.getPurgeOnNoConsumers() == null ? purgeOnNoConsumers : queueAttributes.getPurgeOnNoConsumers(),
+            queueAttributes.getExclusive() == null ? exclusive : queueAttributes.getExclusive(),
+            queueAttributes.getLastValue() == null ? lastValue : queueAttributes.getLastValue()
+         );
+      }
+   }
+
 
    private static final class CompletionListenerWrapper implements SendAcknowledgementHandler {
 

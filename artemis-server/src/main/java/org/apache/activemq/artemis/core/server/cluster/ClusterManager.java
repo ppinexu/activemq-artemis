@@ -53,6 +53,7 @@ import org.apache.activemq.artemis.core.server.ActiveMQServer;
 import org.apache.activemq.artemis.core.server.ActiveMQServerLogger;
 import org.apache.activemq.artemis.core.server.NodeManager;
 import org.apache.activemq.artemis.core.server.Queue;
+import org.apache.activemq.artemis.core.server.transformer.Transformer;
 import org.apache.activemq.artemis.core.server.cluster.ha.HAManager;
 import org.apache.activemq.artemis.core.server.cluster.impl.BridgeImpl;
 import org.apache.activemq.artemis.core.server.cluster.impl.BroadcastGroupImpl;
@@ -395,7 +396,7 @@ public final class ClusterManager implements ActiveMQComponent {
          return;
       }
 
-      Transformer transformer = server.getServiceRegistry().getBridgeTransformer(config.getName(), config.getTransformerClassName());
+      Transformer transformer = server.getServiceRegistry().getBridgeTransformer(config.getName(), config.getTransformerConfiguration());
 
       Binding binding = postOffice.getBinding(new SimpleString(config.getQueueName()));
 
@@ -405,7 +406,9 @@ public final class ClusterManager implements ActiveMQComponent {
          return;
       }
 
-      server.callBrokerPlugins(server.hasBrokerPlugins() ? plugin -> plugin.beforeDeployBridge(config) : null);
+      if (server.hasBrokerBridgePlugins()) {
+         server.callBrokerBridgePlugins(plugin -> plugin.beforeDeployBridge(config));
+      }
 
       Queue queue = (Queue) binding.getBindable();
 
@@ -480,7 +483,9 @@ public final class ClusterManager implements ActiveMQComponent {
 
       bridge.start();
 
-      server.callBrokerPlugins(server.hasBrokerPlugins() ? plugin -> plugin.afterDeployBridge(bridge) : null);
+      if (server.hasBrokerBridgePlugins()) {
+         server.callBrokerBridgePlugins(plugin -> plugin.afterDeployBridge(bridge));
+      }
    }
 
    public static class IncomingInterceptorLookingForExceptionMessage implements Interceptor {
@@ -510,7 +515,7 @@ public final class ClusterManager implements ActiveMQComponent {
                      try {
                         manager.stop();
                      } catch (Exception e) {
-                        ActiveMQServerLogger.LOGGER.warn(e.getMessage(), e);
+                        ActiveMQServerLogger.LOGGER.failedToStopClusterManager(e);
                      }
                   }
 
@@ -550,7 +555,7 @@ public final class ClusterManager implements ActiveMQComponent {
          try {
             clusterConnection.stop();
          } catch (Exception e) {
-            ActiveMQServerLogger.LOGGER.warn(e.getMessage(), e);
+            ActiveMQServerLogger.LOGGER.failedToStopClusterConnection(e);
          }
       }
       clearClusterConnections();

@@ -104,6 +104,16 @@ public final class FileWrapperJournal extends JournalBase {
    }
 
    /**
+    * The max size record that can be stored in the journal
+    *
+    * @return
+    */
+   @Override
+   public long getMaxRecordSize() {
+      return journal.getMaxRecordSize();
+   }
+
+   /**
     * Write the record to the current file.
     */
    private void writeRecord(JournalInternalRecord encoder,
@@ -259,7 +269,8 @@ public final class FileWrapperJournal extends JournalBase {
    @Override
    public JournalLoadInformation load(List<RecordInfo> committedRecords,
                                       List<PreparedTransactionInfo> preparedTransactions,
-                                      TransactionFailureCallback transactionFailure) throws Exception {
+                                      TransactionFailureCallback transactionFailure,
+                                      boolean fixbadtx) throws Exception {
       throw new ActiveMQUnsupportedPacketException();
    }
 

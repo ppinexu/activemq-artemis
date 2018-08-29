@@ -76,6 +76,10 @@ public abstract class ManagementTestBase extends ActiveMQTestBase {
    public void setUp() throws Exception {
       super.setUp();
 
+      createMBeanServer();
+   }
+
+   protected void createMBeanServer() {
       mbeanServer = MBeanServerFactory.createMBeanServer();
    }
 
@@ -116,6 +120,27 @@ public abstract class ManagementTestBase extends ActiveMQTestBase {
    protected long getMessageCount(QueueControl control) throws Exception {
       control.flushExecutor();
       return control.getMessageCount();
+   }
+
+   protected int getGroupCount(QueueControl control) throws Exception {
+      control.flushExecutor();
+      return control.getGroupCount();
+   }
+
+
+   protected long getDurableMessageCount(QueueControl control) throws Exception {
+      control.flushExecutor();
+      return control.getDurableMessageCount();
+   }
+
+   protected long getMessageSize(QueueControl control) throws Exception {
+      control.flushExecutor();
+      return control.getPersistentSize();
+   }
+
+   protected long getDurableMessageSize(QueueControl control) throws Exception {
+      control.flushExecutor();
+      return control.getDurablePersistentSize();
    }
 
    protected long getMessagesAdded(QueueControl control) throws Exception {

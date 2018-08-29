@@ -28,6 +28,9 @@ of them receive the same, original message. This means that the results
 of a transformer on a message are not directly available for other
 diverts or their filters on the same address.
 
+See the documentation on [adding runtime dependencies](using-server.md) to 
+understand how to make your transformer available to the broker.
+
 A divert will only divert a message to an address on the *same server*,
 however, if you want to divert to an address on a different server, a
 common pattern would be to divert to a local store-and-forward queue,
@@ -41,8 +44,15 @@ for messages. Combining diverts with bridges allows you to create a
 distributed network of reliable routing connections between multiple
 geographically distributed servers, creating your global messaging mesh.
 
-Diverts are defined as xml in the `broker.xml` file.
+Diverts are defined as xml in the `broker.xml` file at the `core` attribute level.
 There can be zero or more diverts in the file.
+
+Diverted message gets a new message ID, and its address is set to a forward
+address. To access original values, use message properties: original destination
+is stored in a String property `_AMQ_ORIG_ADDRESS` (`Message.HDR_ORIGINAL_ADDRESS`
+constant from the Core API), and the original message ID in a Long property
+`_AMQ_ORIG_MESSAGE_ID` (`Message.HDR_ORIG_MESSAGE_ID` constant from the
+Core API).
 
 Please see the examples for a full working example showing you how to
 configure and use diverts.
@@ -58,15 +68,17 @@ address. Matching messages do not get routed to the old address.
 Here's some example xml configuration for an exclusive divert, it's
 taken from the divert example:
 
-    <divert name="prices-divert">
-       <address>priceUpdates</address>
-       <forwarding-address>priceForwarding</forwarding-address>
-       <filter string="office='New York'"/>
-       <transformer-class-name>
-          org.apache.activemq.artemis.jms.example.AddForwardingTimeTransformer
-       </transformer-class-name>
-       <exclusive>true</exclusive>
-    </divert>
+```xml
+<divert name="prices-divert">
+   <address>priceUpdates</address>
+   <forwarding-address>priceForwarding</forwarding-address>
+   <filter string="office='New York'"/>
+   <transformer-class-name>
+      org.apache.activemq.artemis.jms.example.AddForwardingTimeTransformer
+   </transformer-class-name>
+   <exclusive>true</exclusive>
+</divert>
+```
 
 We define a divert called `prices-divert` that will divert any
 messages sent to the address `priceUpdates` to another local address 
@@ -103,11 +115,13 @@ Non exclusive diverts can be configured in the same way as exclusive
 diverts with an optional filter and transformer, here's an example
 non-exclusive divert, again from the divert example:
 
-    <divert name="order-divert">
-        <address>orders</address>
-        <forwarding-address>spyTopic</forwarding-address>
-        <exclusive>false</exclusive>
-    </divert>
+```xml
+<divert name="order-divert">
+   <address>orders</address>
+   <forwarding-address>spyTopic</forwarding-address>
+   <exclusive>false</exclusive>
+</divert>
+```
 
 The above divert example takes a copy of every message sent to the
 address '`orders`' and sends it to a local address called

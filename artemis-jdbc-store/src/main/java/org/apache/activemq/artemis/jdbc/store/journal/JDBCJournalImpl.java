@@ -31,7 +31,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.apache.activemq.artemis.api.core.ActiveMQException;
 import org.apache.activemq.artemis.api.core.ActiveMQExceptionType;
+import org.apache.activemq.artemis.api.core.ActiveMQShutdownException;
 import org.apache.activemq.artemis.core.io.IOCriticalErrorListener;
 import org.apache.activemq.artemis.core.io.SequentialFileFactory;
 import org.apache.activemq.artemis.core.journal.EncoderPersister;
@@ -56,7 +58,9 @@ public class JDBCJournalImpl extends AbstractJDBCDriver implements Journal {
    private static final Logger logger = Logger.getLogger(JDBCJournalImpl.class);
 
    // Sync Delay in ms
-   private static final int SYNC_DELAY = 5;
+   //private static final int SYNC_DELAY = 5;
+
+   private long syncDelay;
 
    private static int USER_VERSION = 1;
 
@@ -92,15 +96,16 @@ public class JDBCJournalImpl extends AbstractJDBCDriver implements Journal {
 
    public JDBCJournalImpl(DataSource dataSource,
                           SQLProvider provider,
-                          String tableName,
                           ScheduledExecutorService scheduledExecutorService,
                           Executor completeExecutor,
-                          IOCriticalErrorListener criticalIOErrorListener) {
+                          IOCriticalErrorListener criticalIOErrorListener,
+                          long syncDelay) {
       super(dataSource, provider);
       records = new ArrayList<>();
       this.scheduledExecutorService = scheduledExecutorService;
       this.completeExecutor = completeExecutor;
       this.criticalIOErrorListener = criticalIOErrorListener;
+      this.syncDelay = syncDelay;
    }
 
    public JDBCJournalImpl(String jdbcUrl,
@@ -108,23 +113,35 @@ public class JDBCJournalImpl extends AbstractJDBCDriver implements Journal {
                           SQLProvider sqlProvider,
                           ScheduledExecutorService scheduledExecutorService,
                           Executor completeExecutor,
-                          IOCriticalErrorListener criticalIOErrorListener) {
+                          IOCriticalErrorListener criticalIOErrorListener,
+                          long syncDelay) {
       super(sqlProvider, jdbcUrl, jdbcDriverClass);
       records = new ArrayList<>();
       this.scheduledExecutorService = scheduledExecutorService;
       this.completeExecutor = completeExecutor;
       this.criticalIOErrorListener = criticalIOErrorListener;
+      this.syncDelay = syncDelay;
    }
 
    @Override
    public void start() throws SQLException {
       super.start();
-      syncTimer = new JDBCJournalSync(scheduledExecutorService, completeExecutor, SYNC_DELAY, TimeUnit.MILLISECONDS, this);
+      syncTimer = new JDBCJournalSync(scheduledExecutorService, completeExecutor, syncDelay, TimeUnit.MILLISECONDS, this);
       started = true;
    }
 
    @Override
    public void flush() throws Exception {
+   }
+
+   /**
+    * The max size record that can be stored in the journal
+    *
+    * @return
+    */
+   @Override
+   public long getMaxRecordSize() {
+      return sqlProvider.getMaxBlobSize();
    }
 
    @Override
@@ -319,19 +336,19 @@ public class JDBCJournalImpl extends AbstractJDBCDriver implements Journal {
    }
 
 
-   private void checkStatus() {
+   private void checkStatus() throws Exception {
       checkStatus(null);
    }
 
-   private void checkStatus(IOCompletion callback) {
+   private void checkStatus(IOCompletion callback) throws Exception {
       if (!started) {
          if (callback != null) callback.onError(-1, "JDBC Journal is not loaded");
-         throw new IllegalStateException("JDBCJournal is not loaded");
+         throw new ActiveMQShutdownException("JDBCJournal is not loaded");
       }
 
       if (failed.get()) {
          if (callback != null) callback.onError(-1, "JDBC Journal failed");
-         throw new IllegalStateException("JDBCJournal Failed");
+         throw new ActiveMQException("JDBCJournal Failed");
       }
    }
 
@@ -373,7 +390,7 @@ public class JDBCJournalImpl extends AbstractJDBCDriver implements Journal {
       if (callback != null) callback.waitCompletion();
    }
 
-   private synchronized void addTxRecord(JDBCJournalRecord record) {
+   private synchronized void addTxRecord(JDBCJournalRecord record) throws Exception {
 
       if (logger.isTraceEnabled()) {
          logger.trace("addTxRecord " + record + ", started=" + started + ", failed=" + failed);
@@ -871,12 +888,6 @@ public class JDBCJournalImpl extends AbstractJDBCDriver implements Journal {
    }
 
    @Override
-   public JournalLoadInformation load(List<RecordInfo> committedRecords,
-                                      List<PreparedTransactionInfo> preparedTransactions,
-                                      TransactionFailureCallback transactionFailure) throws Exception {
-      return load(committedRecords, preparedTransactions, transactionFailure, true);
-   }
-
    public synchronized JournalLoadInformation load(final List<RecordInfo> committedRecords,
                                                    final List<PreparedTransactionInfo> preparedTransactions,
                                                    final TransactionFailureCallback failureCallback,

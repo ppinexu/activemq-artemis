@@ -222,7 +222,7 @@ public abstract class AbstractJournalUpdateTask implements JournalReaderCallback
       writingChannel = null;
    }
 
-   public boolean lookupRecord(final long id) {
+   public boolean containsRecord(final long id) {
       return recordsSnapshot.contains(id);
    }
 
@@ -241,7 +241,7 @@ public abstract class AbstractJournalUpdateTask implements JournalReaderCallback
 
       writingChannel = ActiveMQBuffers.wrappedBuffer(bufferWrite);
 
-      currentFile = filesRepository.takeFile(false, false, false, true);
+      currentFile = filesRepository.openFileCMP();
 
       sequentialFile = currentFile.getFile();
 

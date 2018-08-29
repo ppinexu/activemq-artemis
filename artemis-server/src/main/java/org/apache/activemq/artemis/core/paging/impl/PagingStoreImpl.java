@@ -62,6 +62,7 @@ import org.apache.activemq.artemis.core.transaction.TransactionOperation;
 import org.apache.activemq.artemis.core.transaction.TransactionPropertyIndexes;
 import org.apache.activemq.artemis.utils.FutureLatch;
 import org.apache.activemq.artemis.utils.actors.ArtemisExecutor;
+import org.apache.activemq.artemis.utils.runnables.AtomicRunnable;
 import org.jboss.logging.Logger;
 
 /**
@@ -348,11 +349,23 @@ public class PagingStoreImpl implements PagingStore {
    @Override
    public synchronized void stop() throws Exception {
       if (running) {
+         cursorProvider.flushExecutors();
          cursorProvider.stop();
 
-         running = false;
+         final List<Runnable> pendingTasks = new ArrayList<>();
+         final int pendingTasksWhileShuttingDown = executor.shutdownNow(pendingTasks::add);
+         if (pendingTasksWhileShuttingDown > 0) {
+            logger.tracef("Try executing %d pending tasks on stop", pendingTasksWhileShuttingDown);
+            for (Runnable pendingTask : pendingTasks) {
+               try {
+                  pendingTask.run();
+               } catch (Throwable t) {
+                  logger.warn("Error while executing a pending task on shutdown", t);
+               }
+            }
+         }
 
-         flushExecutors();
+         running = false;
 
          if (currentPage != null) {
             currentPage.close(false);
@@ -629,40 +642,16 @@ public class PagingStoreImpl implements PagingStore {
 
    }
 
-   private final Queue<OverSizedRunnable> onMemoryFreedRunnables = new ConcurrentLinkedQueue<>();
+   private final Queue<Runnable> onMemoryFreedRunnables = new ConcurrentLinkedQueue<>();
 
-   private class MemoryFreedRunnablesExecutor implements Runnable {
+   private void memoryReleased() {
+      Runnable runnable;
 
-      @Override
-      public void run() {
-         Runnable runnable;
-
-         while ((runnable = onMemoryFreedRunnables.poll()) != null) {
-            runnable.run();
-         }
+      while ((runnable = onMemoryFreedRunnables.poll()) != null) {
+         runnable.run();
       }
    }
 
-   private final Runnable memoryFreedRunnablesExecutor = new MemoryFreedRunnablesExecutor();
-
-   // To be used when the memory is oversized either by local settings or global settings on blocking addresses
-   private static final class OverSizedRunnable implements Runnable {
-
-      private final AtomicBoolean ran = new AtomicBoolean(false);
-
-      private final Runnable runnable;
-
-      private OverSizedRunnable(final Runnable runnable) {
-         this.runnable = runnable;
-      }
-
-      @Override
-      public void run() {
-         if (ran.compareAndSet(false, true)) {
-            runnable.run();
-         }
-      }
-   }
 
    @Override
    public boolean checkMemory(final Runnable runWhenAvailable) {
@@ -673,9 +662,8 @@ public class PagingStoreImpl implements PagingStore {
          }
       } else if (pagingManager.isDiskFull() || addressFullMessagePolicy == AddressFullMessagePolicy.BLOCK && (maxSize != -1 || usingGlobalMaxSize)) {
          if (pagingManager.isDiskFull() || maxSize > 0 && sizeInBytes.get() > maxSize || pagingManager.isGlobalFull()) {
-            OverSizedRunnable ourRunnable = new OverSizedRunnable(runWhenAvailable);
 
-            onMemoryFreedRunnables.add(ourRunnable);
+            onMemoryFreedRunnables.add(AtomicRunnable.checkAtomic(runWhenAvailable));
 
             // We check again to avoid a race condition where the size can come down just after the element
             // has been added, but the check to execute was done before the element was added
@@ -683,7 +671,7 @@ public class PagingStoreImpl implements PagingStore {
             // MUCH better performance in a highly concurrent environment
             if (!pagingManager.isGlobalFull() && (sizeInBytes.get() <= maxSize || maxSize < 0)) {
                // run it now
-               ourRunnable.run();
+               runWhenAvailable.run();
             } else {
                if (usingGlobalMaxSize || pagingManager.isDiskFull()) {
                   pagingManager.addBlockedStore(this);
@@ -698,7 +686,6 @@ public class PagingStoreImpl implements PagingStore {
                   blocking.set(true);
                }
             }
-
             return true;
          }
       }
@@ -727,7 +714,7 @@ public class PagingStoreImpl implements PagingStore {
          if (size > 0) {
             if (maxSize != -1 && newSize > maxSize || globalFull) {
                if (startPaging()) {
-                  ActiveMQServerLogger.LOGGER.pageStoreStart(storeName, newSize, maxSize);
+                  ActiveMQServerLogger.LOGGER.pageStoreStart(storeName, newSize, maxSize, pagingManager.getGlobalSize());
                }
             }
          }
@@ -744,7 +731,7 @@ public class PagingStoreImpl implements PagingStore {
    public boolean checkReleaseMemory(boolean globalOversized, long newSize) {
       if (!globalOversized && (newSize <= maxSize || maxSize < 0)) {
          if (!onMemoryFreedRunnables.isEmpty()) {
-            executor.execute(memoryFreedRunnablesExecutor);
+            executor.execute(this::memoryReleased);
             if (blocking.get()) {
                ActiveMQServerLogger.LOGGER.unblockingMessageProduction(address, sizeInBytes.get(), maxSize);
                blocking.set(false);
@@ -773,7 +760,7 @@ public class PagingStoreImpl implements PagingStore {
             if (!printedDropMessagesWarning) {
                printedDropMessagesWarning = true;
 
-               ActiveMQServerLogger.LOGGER.pageStoreDropMessages(storeName, sizeInBytes.get(), maxSize);
+               ActiveMQServerLogger.LOGGER.pageStoreDropMessages(storeName, sizeInBytes.get(), maxSize, pagingManager.getGlobalSize());
             }
 
             if (message.isLargeMessage()) {
@@ -840,7 +827,8 @@ public class PagingStoreImpl implements PagingStore {
             // the apply counter will make sure we write a record on journal
             // especially on the case for non transactional sends and paging
             // doing this will give us a possibility of recovering the page counters
-            applyPageCounters(tx, getCurrentPage(), listCtx);
+            long persistentSize = pagedMessage.getPersistentSize() > 0 ? pagedMessage.getPersistentSize() : 0;
+            applyPageCounters(tx, getCurrentPage(), listCtx, persistentSize);
 
             currentPage.write(pagedMessage);
 
@@ -906,22 +894,22 @@ public class PagingStoreImpl implements PagingStore {
     * @param ctx
     * @throws Exception
     */
-   private void applyPageCounters(Transaction tx, Page page, RouteContextList ctx) throws Exception {
+   private void applyPageCounters(Transaction tx, Page page, RouteContextList ctx, long size) throws Exception {
       List<org.apache.activemq.artemis.core.server.Queue> durableQueues = ctx.getDurableQueues();
       List<org.apache.activemq.artemis.core.server.Queue> nonDurableQueues = ctx.getNonDurableQueues();
       for (org.apache.activemq.artemis.core.server.Queue q : durableQueues) {
          if (tx == null) {
             // non transactional writes need an intermediate place
             // to avoid the counter getting out of sync
-            q.getPageSubscription().getCounter().pendingCounter(page, 1);
+            q.getPageSubscription().getCounter().pendingCounter(page, 1, size);
          } else {
             // null tx is treated through pending counters
-            q.getPageSubscription().getCounter().increment(tx, 1);
+            q.getPageSubscription().getCounter().increment(tx, 1, size);
          }
       }
 
       for (org.apache.activemq.artemis.core.server.Queue q : nonDurableQueues) {
-         q.getPageSubscription().getCounter().increment(tx, 1);
+         q.getPageSubscription().getCounter().increment(tx, 1, size);
       }
 
    }

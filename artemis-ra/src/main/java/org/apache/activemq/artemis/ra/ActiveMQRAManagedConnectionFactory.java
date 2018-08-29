@@ -268,6 +268,10 @@ public final class ActiveMQRAManagedConnectionFactory implements ManagedConnecti
       return ra;
    }
 
+   public boolean isIgnoreJTA() {
+      return ra.isIgnoreJTA();
+   }
+
    /**
     * Set the resource adapter
     * <br>
@@ -586,6 +590,14 @@ public final class ActiveMQRAManagedConnectionFactory implements ManagedConnecti
 
    public void setCacheDestinations(final Boolean cacheDestinations) {
       mcfProperties.setCacheDestinations(cacheDestinations);
+   }
+
+   public Boolean isEnable1xPrefixes() {
+      return mcfProperties.isEnable1xPrefixes();
+   }
+
+   public void setEnable1xPrefixes(final Boolean enable1xPrefixes) {
+      mcfProperties.setEnable1xPrefixes(enable1xPrefixes);
    }
 
    public Integer getScheduledThreadPoolMaxSize() {

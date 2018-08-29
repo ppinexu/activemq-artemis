@@ -16,9 +16,8 @@
  */
 package org.apache.activemq.artemis.utils;
 
-import java.util.HashSet;
+import java.util.EnumSet;
 import java.util.Map;
-import java.util.Set;
 
 import org.apache.activemq.artemis.api.core.Pair;
 import org.apache.activemq.artemis.api.core.SimpleString;
@@ -26,25 +25,12 @@ import org.apache.activemq.artemis.api.core.RoutingType;
 
 public class PrefixUtil {
 
-   public static Pair<SimpleString, RoutingType> getAddressAndRoutingType(SimpleString address,
-                                                                   RoutingType defaultRoutingType,
-                                                                   Map<SimpleString, RoutingType> prefixes) {
+   public static Pair<SimpleString, EnumSet<RoutingType>> getAddressAndRoutingTypes(SimpleString address,
+                                                                                    EnumSet<RoutingType> defaultRoutingTypes,
+                                                                                    Map<SimpleString, RoutingType> prefixes) {
       for (Map.Entry<SimpleString, RoutingType> entry : prefixes.entrySet()) {
          if (address.startsWith(entry.getKey())) {
-            return new Pair<>(removePrefix(address, entry.getKey()), entry.getValue());
-         }
-      }
-      return new Pair<>(address, defaultRoutingType);
-   }
-
-   public static Pair<SimpleString, Set<RoutingType>> getAddressAndRoutingTypes(SimpleString address,
-                                                                          Set<RoutingType> defaultRoutingTypes,
-                                                                          Map<SimpleString, RoutingType> prefixes) {
-      for (Map.Entry<SimpleString, RoutingType> entry : prefixes.entrySet()) {
-         if (address.startsWith(entry.getKey())) {
-            Set routingTypes = new HashSet<>();
-            routingTypes.add(entry.getValue());
-            return new Pair<>(removePrefix(address, entry.getKey()), routingTypes);
+            return new Pair<>(removePrefix(address, entry.getKey()), EnumSet.of(entry.getValue()));
          }
       }
       return new Pair<>(address, defaultRoutingTypes);
@@ -59,7 +45,20 @@ public class PrefixUtil {
       return address;
    }
 
-   private static SimpleString removePrefix(SimpleString string, SimpleString prefix) {
+   public static SimpleString getPrefix(SimpleString address, Map<SimpleString, RoutingType> prefixes) {
+      for (Map.Entry<SimpleString, RoutingType> entry : prefixes.entrySet()) {
+         if (address.startsWith(entry.getKey())) {
+            return removeAddress(address, entry.getKey());
+         }
+      }
+      return null;
+   }
+
+   public static SimpleString removePrefix(SimpleString string, SimpleString prefix) {
       return string.subSeq(prefix.length(), string.length());
+   }
+
+   public static SimpleString removeAddress(SimpleString string, SimpleString prefix) {
+      return string.subSeq(0, prefix.length());
    }
 }

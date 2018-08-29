@@ -194,9 +194,16 @@ public interface Journal extends ActiveMQComponent {
 
    void lineUpContext(IOCompletion callback);
 
+   default JournalLoadInformation load(List<RecordInfo> committedRecords,
+                               List<PreparedTransactionInfo> preparedTransactions,
+                               TransactionFailureCallback transactionFailure) throws Exception {
+      return load(committedRecords, preparedTransactions, transactionFailure, true);
+   }
+
    JournalLoadInformation load(List<RecordInfo> committedRecords,
                                List<PreparedTransactionInfo> preparedTransactions,
-                               TransactionFailureCallback transactionFailure) throws Exception;
+                               TransactionFailureCallback transactionFailure,
+                               boolean fixBadTx) throws Exception;
 
    int getAlignment() throws Exception;
 
@@ -279,4 +286,10 @@ public interface Journal extends ActiveMQComponent {
     * It will make sure there are no more pending operations on the Executors.
     * */
    void flush() throws Exception;
+
+   /**
+    * The max size record that can be stored in the journal
+    * @return
+    */
+   long getMaxRecordSize();
 }

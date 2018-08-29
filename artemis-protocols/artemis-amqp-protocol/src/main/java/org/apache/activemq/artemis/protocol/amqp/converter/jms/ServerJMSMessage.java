@@ -73,7 +73,7 @@ public class ServerJMSMessage implements Message {
    protected ActiveMQBuffer getReadBodyBuffer() {
       if (readBodyBuffer == null) {
          // to avoid clashes between multiple threads
-         readBodyBuffer = message.getReadOnlyBodyBuffer();
+         readBodyBuffer = message.getDataBuffer();
       }
       return readBodyBuffer;
    }
@@ -139,7 +139,7 @@ public class ServerJMSMessage implements Message {
    public final Destination getJMSReplyTo() throws JMSException {
       SimpleString reply = MessageUtil.getJMSReplyTo(message);
       if (reply != null) {
-         return new ServerDestination(reply.toString());
+         return new ServerDestination(reply);
       } else {
          return null;
       }
@@ -148,7 +148,6 @@ public class ServerJMSMessage implements Message {
    @Override
    public final void setJMSReplyTo(Destination replyTo) throws JMSException {
       MessageUtil.setJMSReplyTo(message, replyTo == null ? null : ((ActiveMQDestination) replyTo).getSimpleAddress());
-
    }
 
    @Override
@@ -158,7 +157,7 @@ public class ServerJMSMessage implements Message {
       if (sdest == null) {
          return null;
       } else {
-         return new ServerDestination(sdest.toString());
+         return new ServerDestination(sdest);
       }
    }
 
@@ -369,11 +368,15 @@ public class ServerJMSMessage implements Message {
     * Encode the body into the internal message
     */
    public void encode() throws Exception {
-      message.getBodyBuffer().resetReaderIndex();
+      if (!message.isLargeMessage()) {
+         message.getBodyBuffer().resetReaderIndex();
+      }
    }
 
    public void decode() throws Exception {
-      message.getBodyBuffer().resetReaderIndex();
+      if (!message.isLargeMessage()) {
+         message.getBodyBuffer().resetReaderIndex();
+      }
    }
 
    @Override

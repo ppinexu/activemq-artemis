@@ -135,10 +135,12 @@ final class MappedSequentialFile implements SequentialFile {
    public void fill(int size) throws IOException {
       checkIsOpen();
       //the fill will give a big performance hit when done in parallel of other writings!
-      this.mappedFile.zeros(this.mappedFile.position(), size);
+      this.mappedFile.zeros(0, size);
       if (factory.isDatasync()) {
          this.mappedFile.force();
       }
+      //set the position to 0 to match the fill contract
+      this.mappedFile.position(0);
    }
 
    @Override
@@ -334,6 +336,11 @@ final class MappedSequentialFile implements SequentialFile {
 
    @Override
    public void close() {
+      close(true);
+   }
+
+   @Override
+   public void close(boolean waitOnSync) {
       if (this.mappedFile != null) {
          this.mappedFile.close();
          this.mappedFile = null;
@@ -359,14 +366,7 @@ final class MappedSequentialFile implements SequentialFile {
 
    @Override
    public void renameTo(String newFileName) throws Exception {
-      try {
-         close();
-      } catch (Exception e) {
-         if (e instanceof IOException) {
-            factory.onIOError(new ActiveMQIOErrorException(e.getMessage(), e), e.getMessage(), this);
-         }
-         throw e;
-      }
+      close();
       if (this.fileName == null) {
          this.fileName = this.file.getName();
       }

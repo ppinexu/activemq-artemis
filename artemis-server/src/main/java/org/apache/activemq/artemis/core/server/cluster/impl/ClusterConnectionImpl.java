@@ -48,7 +48,6 @@ import org.apache.activemq.artemis.core.client.impl.Topology;
 import org.apache.activemq.artemis.core.client.impl.TopologyMemberImpl;
 import org.apache.activemq.artemis.core.config.impl.ConfigurationImpl;
 import org.apache.activemq.artemis.core.postoffice.Binding;
-import org.apache.activemq.artemis.core.postoffice.Bindings;
 import org.apache.activemq.artemis.core.postoffice.PostOffice;
 import org.apache.activemq.artemis.core.postoffice.impl.PostOfficeImpl;
 import org.apache.activemq.artemis.core.server.ActiveMQMessageBundle;
@@ -750,6 +749,26 @@ public final class ClusterConnectionImpl implements ClusterConnection, AfterConn
       topology.updateAsLive(nodeID, localMember);
    }
 
+
+   @Override
+   public ClusterConnectionMetrics getMetrics() {
+      long messagesPendingAcknowledgement = 0;
+      long messagesAcknowledged = 0;
+      for (MessageFlowRecord record : records.values()) {
+         final BridgeMetrics metrics = record.getBridge() != null ? record.getBridge().getMetrics() : null;
+         messagesPendingAcknowledgement += metrics != null ? metrics.getMessagesPendingAcknowledgement() : 0;
+         messagesAcknowledged += metrics != null ? metrics.getMessagesAcknowledged() : 0;
+      }
+
+      return new ClusterConnectionMetrics(messagesPendingAcknowledgement, messagesAcknowledged);
+   }
+
+   @Override
+   public BridgeMetrics getBridgeMetrics(String nodeId) {
+      final MessageFlowRecord record = records.get(nodeId);
+      return record != null && record.getBridge() != null ? record.getBridge().getMetrics() : null;
+   }
+
    private void createNewRecord(final long eventUID,
                                 final String targetNodeID,
                                 final TransportConfiguration connector,
@@ -788,8 +807,8 @@ public final class ClusterConnectionImpl implements ClusterConnection, AfterConn
       targetLocator.setRetryIntervalMultiplier(retryIntervalMultiplier);
       targetLocator.setMinLargeMessageSize(minLargeMessageSize);
 
-      // No producer flow control on the bridges, as we don't want to lock the queues
-      targetLocator.setProducerWindowSize(-1);
+      // No producer flow control on the bridges by default, as we don't want to lock the queues
+      targetLocator.setProducerWindowSize(this.producerWindowSize);
 
       targetLocator.setAfterConnectionInternalListener(this);
 
@@ -1233,9 +1252,13 @@ public final class ClusterConnectionImpl implements ClusterConnection, AfterConn
          } catch (Exception ignore) {
          }
 
-         Bindings theBindings = postOffice.getBindingsForAddress(queueAddress);
-
-         theBindings.setMessageLoadBalancingType(messageLoadBalancingType);
+         try {
+            postOffice.updateMessageLoadBalancingTypeForAddress(queueAddress, messageLoadBalancingType);
+         } catch (Exception e) {
+            if (logger.isTraceEnabled()) {
+               logger.trace(e.getLocalizedMessage(), e);
+            }
+         }
 
       }
 
@@ -1256,7 +1279,8 @@ public final class ClusterConnectionImpl implements ClusterConnection, AfterConn
          RemoteQueueBinding binding = bindings.remove(clusterName);
 
          if (binding == null) {
-            throw new IllegalStateException("Cannot find binding for queue " + clusterName);
+            logger.warn("Cannot remove binding, because cannot find binding for queue " + clusterName);
+            return;
          }
 
          postOffice.removeBinding(binding.getUniqueName(), null, false);
@@ -1484,7 +1508,7 @@ public final class ClusterConnectionImpl implements ClusterConnection, AfterConn
             record.close();
          }
       } catch (Exception e) {
-         ActiveMQServerLogger.LOGGER.warn(e);
+         ActiveMQServerLogger.LOGGER.failedToRemoveRecord(e);
       }
    }
 
@@ -1497,7 +1521,7 @@ public final class ClusterConnectionImpl implements ClusterConnection, AfterConn
             record.disconnectBindings();
          }
       } catch (Exception e) {
-         ActiveMQServerLogger.LOGGER.warn(e.getMessage(), e);
+         ActiveMQServerLogger.LOGGER.failedToDisconnectBindings(e);
       }
    }
 

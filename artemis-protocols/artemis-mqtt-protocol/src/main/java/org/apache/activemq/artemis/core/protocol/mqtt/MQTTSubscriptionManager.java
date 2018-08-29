@@ -24,28 +24,29 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-import io.netty.handler.codec.mqtt.MqttTopicSubscription;
 import org.apache.activemq.artemis.api.core.ActiveMQQueueExistsException;
 import org.apache.activemq.artemis.api.core.FilterConstants;
+import org.apache.activemq.artemis.api.core.RoutingType;
 import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.core.server.ActiveMQMessageBundle;
 import org.apache.activemq.artemis.core.server.BindingQueryResult;
 import org.apache.activemq.artemis.core.server.Queue;
-import org.apache.activemq.artemis.api.core.RoutingType;
 import org.apache.activemq.artemis.core.server.ServerConsumer;
 import org.apache.activemq.artemis.core.server.impl.AddressInfo;
 import org.apache.activemq.artemis.utils.CompositeAddress;
 
+import io.netty.handler.codec.mqtt.MqttTopicSubscription;
+
 public class MQTTSubscriptionManager {
 
-   private MQTTSession session;
+   private final MQTTSession session;
 
-   private ConcurrentMap<Long, Integer> consumerQoSLevels;
+   private final ConcurrentMap<Long, Integer> consumerQoSLevels;
 
-   private ConcurrentMap<String, ServerConsumer> consumers;
+   private final ConcurrentMap<String, ServerConsumer> consumers;
 
    // We filter out Artemis management messages and notifications
-   private SimpleString managementFilter;
+   private final SimpleString managementFilter;
 
    public MQTTSubscriptionManager(MQTTSession session) {
       this.session = session;
@@ -108,7 +109,8 @@ public class MQTTSubscriptionManager {
             if (!bindingQueryResult.isAutoCreateAddresses()) {
                throw ActiveMQMessageBundle.BUNDLE.addressDoesNotExist(SimpleString.toSimpleString(address));
             }
-            addressInfo = session.getServerSession().createAddress(SimpleString.toSimpleString(address), RoutingType.MULTICAST, false);
+            addressInfo = session.getServerSession().createAddress(SimpleString.toSimpleString(address),
+                                                                   RoutingType.MULTICAST, true);
          }
          return findOrCreateQueue(bindingQueryResult, addressInfo, queue, qos);
       }
@@ -152,7 +154,7 @@ public class MQTTSubscriptionManager {
     */
    private void createConsumerForSubscriptionQueue(Queue queue, String topic, int qos) throws Exception {
       long cid = session.getServer().getStorageManager().generateID();
-      ServerConsumer consumer = session.getServerSession().createConsumer(cid, queue.getName(), null, false, true, -1);
+      ServerConsumer consumer = session.getServerSession().createConsumer(cid, queue.getName(), null, false, false, -1);
       consumer.setStarted(true);
 
       consumers.put(topic, consumer);
@@ -192,10 +194,11 @@ public class MQTTSubscriptionManager {
       SimpleString internalQueueName = getQueueNameForTopic(internalAddress);
       session.getSessionState().removeSubscription(address);
 
+
       ServerConsumer consumer = consumers.get(address);
       consumers.remove(address);
       if (consumer != null) {
-         consumer.removeItself();
+         consumer.close(false);
          consumerQoSLevels.remove(consumer.getID());
       }
 

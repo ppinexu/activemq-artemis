@@ -41,6 +41,17 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.apache.activemq.artemis.api.config.ActiveMQDefaultConfiguration;
+import org.apache.activemq.artemis.core.config.storage.DatabaseStorageConfiguration;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerAddressPlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerBasePlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerBindingPlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerBridgePlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerConnectionPlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerConsumerPlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerCriticalPlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerMessagePlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerQueuePlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerSessionPlugin;
 import org.apache.activemq.artemis.utils.critical.CriticalAnalyzerPolicy;
 import org.apache.activemq.artemis.api.core.BroadcastGroupConfiguration;
 import org.apache.activemq.artemis.api.core.DiscoveryGroupConfiguration;
@@ -65,7 +76,6 @@ import org.apache.activemq.artemis.core.server.JournalType;
 import org.apache.activemq.artemis.core.server.NetworkHealthCheck;
 import org.apache.activemq.artemis.core.server.SecuritySettingPlugin;
 import org.apache.activemq.artemis.core.server.group.impl.GroupingHandlerConfiguration;
-import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerPlugin;
 import org.apache.activemq.artemis.core.settings.impl.AddressSettings;
 import org.apache.activemq.artemis.core.settings.impl.ResourceLimitSettings;
 import org.apache.activemq.artemis.utils.Env;
@@ -243,13 +253,22 @@ public class ConfigurationImpl implements Configuration, Serializable {
 
    private List<SecuritySettingPlugin> securitySettingPlugins = new ArrayList<>();
 
-   private final List<ActiveMQServerPlugin> brokerPlugins = new CopyOnWriteArrayList<>();
+   private final List<ActiveMQServerBasePlugin> brokerPlugins = new CopyOnWriteArrayList<>();
+   private final List<ActiveMQServerConnectionPlugin> brokerConnectionPlugins = new CopyOnWriteArrayList<>();
+   private final List<ActiveMQServerSessionPlugin> brokerSessionPlugins = new CopyOnWriteArrayList<>();
+   private final List<ActiveMQServerConsumerPlugin> brokerConsumerPlugins = new CopyOnWriteArrayList<>();
+   private final List<ActiveMQServerAddressPlugin> brokerAddressPlugins = new CopyOnWriteArrayList<>();
+   private final List<ActiveMQServerQueuePlugin> brokerQueuePlugins = new CopyOnWriteArrayList<>();
+   private final List<ActiveMQServerBindingPlugin> brokerBindingPlugins = new CopyOnWriteArrayList<>();
+   private final List<ActiveMQServerMessagePlugin> brokerMessagePlugins = new CopyOnWriteArrayList<>();
+   private final List<ActiveMQServerBridgePlugin> brokerBridgePlugins = new CopyOnWriteArrayList<>();
+   private final List<ActiveMQServerCriticalPlugin> brokerCriticalPlugins = new CopyOnWriteArrayList<>();
 
    private Map<String, Set<String>> securityRoleNameMappings = new HashMap<>();
 
    protected List<ConnectorServiceConfiguration> connectorServiceConfigurations = new ArrayList<>();
 
-   private boolean maskPassword = ActiveMQDefaultConfiguration.isDefaultMaskPassword();
+   private Boolean maskPassword = ActiveMQDefaultConfiguration.isDefaultMaskPassword();
 
    private transient String passwordCodec;
 
@@ -862,6 +881,9 @@ public class ConfigurationImpl implements Configuration, Serializable {
    @Override
    public Configuration setJournalPoolFiles(int poolSize) {
       this.journalPoolFiles = poolSize;
+      if (!Env.isTestEnv() && poolSize < 0) {
+         ActiveMQServerLogger.LOGGER.useFixedValueOnJournalPoolFiles();
+      }
       return this;
    }
 
@@ -912,14 +934,14 @@ public class ConfigurationImpl implements Configuration, Serializable {
    @Override
    @Deprecated
    public boolean isWildcardRoutingEnabled() {
-      return wildcardConfiguration.isEnabled();
+      return wildcardConfiguration.isRoutingEnabled();
    }
 
    @Override
    @Deprecated
    public ConfigurationImpl setWildcardRoutingEnabled(final boolean enabled) {
-      logger.info("Usage of wildcardRoutingEnabled configuration property is deprecated, please use wildCardConfiguration.enabled instead");
-      wildcardConfiguration.setEnabled(enabled);
+      ActiveMQServerLogger.LOGGER.deprecatedWildcardRoutingEnabled();
+      wildcardConfiguration.setRoutingEnabled(enabled);
       return this;
    }
 
@@ -1367,23 +1389,122 @@ public class ConfigurationImpl implements Configuration, Serializable {
    }
 
    @Override
-   public void registerBrokerPlugins(final List<ActiveMQServerPlugin> plugins) {
-      brokerPlugins.addAll(plugins);
+   public void registerBrokerPlugins(final List<ActiveMQServerBasePlugin> plugins) {
+      plugins.forEach(plugin -> registerBrokerPlugin(plugin));
    }
 
    @Override
-   public void registerBrokerPlugin(final ActiveMQServerPlugin plugin) {
+   public void registerBrokerPlugin(final ActiveMQServerBasePlugin plugin) {
       brokerPlugins.add(plugin);
+      if (plugin instanceof ActiveMQServerConnectionPlugin) {
+         brokerConnectionPlugins.add((ActiveMQServerConnectionPlugin) plugin);
+      }
+      if (plugin instanceof ActiveMQServerSessionPlugin) {
+         brokerSessionPlugins.add((ActiveMQServerSessionPlugin) plugin);
+      }
+      if (plugin instanceof ActiveMQServerConsumerPlugin) {
+         brokerConsumerPlugins.add((ActiveMQServerConsumerPlugin) plugin);
+      }
+      if (plugin instanceof ActiveMQServerAddressPlugin) {
+         brokerAddressPlugins.add((ActiveMQServerAddressPlugin) plugin);
+      }
+      if (plugin instanceof ActiveMQServerQueuePlugin) {
+         brokerQueuePlugins.add((ActiveMQServerQueuePlugin) plugin);
+      }
+      if (plugin instanceof ActiveMQServerBindingPlugin) {
+         brokerBindingPlugins.add((ActiveMQServerBindingPlugin) plugin);
+      }
+      if (plugin instanceof ActiveMQServerMessagePlugin) {
+         brokerMessagePlugins.add((ActiveMQServerMessagePlugin) plugin);
+      }
+      if (plugin instanceof ActiveMQServerBridgePlugin) {
+         brokerBridgePlugins.add((ActiveMQServerBridgePlugin) plugin);
+      }
+      if (plugin instanceof ActiveMQServerCriticalPlugin) {
+         brokerCriticalPlugins.add((ActiveMQServerCriticalPlugin) plugin);
+      }
    }
 
    @Override
-   public void unRegisterBrokerPlugin(final ActiveMQServerPlugin plugin) {
+   public void unRegisterBrokerPlugin(final ActiveMQServerBasePlugin plugin) {
       brokerPlugins.remove(plugin);
+      if (plugin instanceof ActiveMQServerConnectionPlugin) {
+         brokerConnectionPlugins.remove(plugin);
+      }
+      if (plugin instanceof ActiveMQServerSessionPlugin) {
+         brokerSessionPlugins.remove(plugin);
+      }
+      if (plugin instanceof ActiveMQServerConsumerPlugin) {
+         brokerConsumerPlugins.remove(plugin);
+      }
+      if (plugin instanceof ActiveMQServerAddressPlugin) {
+         brokerAddressPlugins.remove(plugin);
+      }
+      if (plugin instanceof ActiveMQServerQueuePlugin) {
+         brokerQueuePlugins.remove(plugin);
+      }
+      if (plugin instanceof ActiveMQServerBindingPlugin) {
+         brokerBindingPlugins.remove(plugin);
+      }
+      if (plugin instanceof ActiveMQServerMessagePlugin) {
+         brokerMessagePlugins.remove(plugin);
+      }
+      if (plugin instanceof ActiveMQServerBridgePlugin) {
+         brokerBridgePlugins.remove(plugin);
+      }
+      if (plugin instanceof ActiveMQServerCriticalPlugin) {
+         brokerCriticalPlugins.remove(plugin);
+      }
    }
 
    @Override
-   public List<ActiveMQServerPlugin> getBrokerPlugins() {
+   public List<ActiveMQServerBasePlugin> getBrokerPlugins() {
       return brokerPlugins;
+   }
+
+   @Override
+   public List<ActiveMQServerConnectionPlugin> getBrokerConnectionPlugins() {
+      return brokerConnectionPlugins;
+   }
+
+   @Override
+   public List<ActiveMQServerSessionPlugin> getBrokerSessionPlugins() {
+      return brokerSessionPlugins;
+   }
+
+   @Override
+   public List<ActiveMQServerConsumerPlugin> getBrokerConsumerPlugins() {
+      return brokerConsumerPlugins;
+   }
+
+   @Override
+   public List<ActiveMQServerAddressPlugin> getBrokerAddressPlugins() {
+      return brokerAddressPlugins;
+   }
+
+   @Override
+   public List<ActiveMQServerQueuePlugin> getBrokerQueuePlugins() {
+      return brokerQueuePlugins;
+   }
+
+   @Override
+   public List<ActiveMQServerBindingPlugin> getBrokerBindingPlugins() {
+      return brokerBindingPlugins;
+   }
+
+   @Override
+   public List<ActiveMQServerMessagePlugin> getBrokerMessagePlugins() {
+      return brokerMessagePlugins;
+   }
+
+   @Override
+   public List<ActiveMQServerBridgePlugin> getBrokerBridgePlugins() {
+      return brokerBridgePlugins;
+   }
+
+   @Override
+   public List<ActiveMQServerCriticalPlugin> getBrokerCriticalPlugins() {
+      return brokerCriticalPlugins;
    }
 
    @Override
@@ -1428,10 +1549,21 @@ public class ConfigurationImpl implements Configuration, Serializable {
    public String toString() {
       StringBuilder sb = new StringBuilder("Broker Configuration (");
       sb.append("clustered=").append(isClustered()).append(",");
-      sb.append("journalDirectory=").append(journalDirectory).append(",");
-      sb.append("bindingsDirectory=").append(bindingsDirectory).append(",");
-      sb.append("largeMessagesDirectory=").append(largeMessagesDirectory).append(",");
-      sb.append("pagingDirectory=").append(pagingDirectory);
+      if (isJDBC()) {
+         DatabaseStorageConfiguration dsc = (DatabaseStorageConfiguration) getStoreConfiguration();
+         sb.append("jdbcDriverClassName=").append(dsc.getJdbcDriverClassName()).append(",");
+         sb.append("jdbcConnectionUrl=").append(dsc.getJdbcConnectionUrl()).append(",");
+         sb.append("messageTableName=").append(dsc.getMessageTableName()).append(",");
+         sb.append("bindingsTableName=").append(dsc.getBindingsTableName()).append(",");
+         sb.append("largeMessageTableName=").append(dsc.getLargeMessageTableName()).append(",");
+         sb.append("pageStoreTableName=").append(dsc.getPageStoreTableName()).append(",");
+
+      } else {
+         sb.append("journalDirectory=").append(journalDirectory).append(",");
+         sb.append("bindingsDirectory=").append(bindingsDirectory).append(",");
+         sb.append("largeMessagesDirectory=").append(largeMessagesDirectory).append(",");
+         sb.append("pagingDirectory=").append(pagingDirectory);
+      }
       sb.append(")");
       return sb.toString();
    }
@@ -1461,12 +1593,12 @@ public class ConfigurationImpl implements Configuration, Serializable {
    }
 
    @Override
-   public boolean isMaskPassword() {
+   public Boolean isMaskPassword() {
       return maskPassword;
    }
 
    @Override
-   public ConfigurationImpl setMaskPassword(boolean maskPassword) {
+   public ConfigurationImpl setMaskPassword(Boolean maskPassword) {
       this.maskPassword = maskPassword;
       return this;
    }
@@ -1513,8 +1645,7 @@ public class ConfigurationImpl implements Configuration, Serializable {
          TransportConfiguration connector = getConnectorConfigurations().get(connectorName);
 
          if (connector == null) {
-            ActiveMQServerLogger.LOGGER.warn("bridgeNoConnector(connectorName)");
-
+            ActiveMQServerLogger.LOGGER.connectionConfigurationIsNull(connectorName == null ? "null" : connectorName);
             return null;
          }
 
@@ -1621,7 +1752,7 @@ public class ConfigurationImpl implements Configuration, Serializable {
       result = prime * result + (logJournalWriteRate ? 1231 : 1237);
       result = prime * result + ((managementAddress == null) ? 0 : managementAddress.hashCode());
       result = prime * result + ((managementNotificationAddress == null) ? 0 : managementNotificationAddress.hashCode());
-      result = prime * result + (maskPassword ? 1231 : 1237);
+      result = prime * result + (maskPassword == null ? 0 : maskPassword.hashCode());
       result = prime * result + maxConcurrentPageIO;
       result = prime * result + (int) (memoryMeasureInterval ^ (memoryMeasureInterval >>> 32));
       result = prime * result + memoryWarningThreshold;
@@ -1674,7 +1805,6 @@ public class ConfigurationImpl implements Configuration, Serializable {
          return false;
       if (asyncConnectionExecutionEnabled != other.asyncConnectionExecutionEnabled)
          return false;
-
       if (bindingsDirectory == null) {
          if (other.bindingsDirectory != null)
             return false;
@@ -1690,11 +1820,13 @@ public class ConfigurationImpl implements Configuration, Serializable {
             return false;
       } else if (!broadcastGroupConfigurations.equals(other.broadcastGroupConfigurations))
          return false;
+
       if (clusterConfigurations == null) {
          if (other.clusterConfigurations != null)
             return false;
       } else if (!clusterConfigurations.equals(other.clusterConfigurations))
          return false;
+
       if (clusterPassword == null) {
          if (other.clusterPassword != null)
             return false;
@@ -1721,6 +1853,7 @@ public class ConfigurationImpl implements Configuration, Serializable {
          return false;
       if (createJournalDir != other.createJournalDir)
          return false;
+
       if (discoveryGroupConfigurations == null) {
          if (other.discoveryGroupConfigurations != null)
             return false;
@@ -1802,8 +1935,15 @@ public class ConfigurationImpl implements Configuration, Serializable {
             return false;
       } else if (!managementNotificationAddress.equals(other.managementNotificationAddress))
          return false;
-      if (maskPassword != other.maskPassword)
-         return false;
+
+      if (this.maskPassword == null) {
+         if (other.maskPassword != null)
+            return false;
+      } else {
+         if (!this.maskPassword.equals(other.maskPassword))
+            return false;
+      }
+
       if (maxConcurrentPageIO != other.maxConcurrentPageIO)
          return false;
       if (memoryMeasureInterval != other.memoryMeasureInterval)
@@ -1825,7 +1965,6 @@ public class ConfigurationImpl implements Configuration, Serializable {
             return false;
       } else if (!name.equals(other.name))
          return false;
-
       if (outgoingInterceptorClassNames == null) {
          if (other.outgoingInterceptorClassNames != null)
             return false;
@@ -1882,6 +2021,7 @@ public class ConfigurationImpl implements Configuration, Serializable {
       if (journalDatasync != other.journalDatasync) {
          return false;
       }
+
       if (globalMaxSize != null && !globalMaxSize.equals(other.globalMaxSize)) {
          return false;
       }

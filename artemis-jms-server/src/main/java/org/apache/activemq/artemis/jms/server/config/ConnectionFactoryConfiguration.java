@@ -185,4 +185,16 @@ public interface ConnectionFactoryConfiguration extends EncodingSupport {
    String getDeserializationWhiteList();
 
    void setDeserializationWhiteList(String whiteList);
+
+   int getInitialMessagePacketSize();
+
+   ConnectionFactoryConfiguration setInitialMessagePacketSize(int size);
+
+   boolean isEnable1xPrefixes();
+
+   ConnectionFactoryConfiguration setEnable1xPrefixes(boolean enable1xPrefixes);
+
+   boolean isEnableSharedClientID();
+
+   ConnectionFactoryConfiguration setEnableSharedClientID(boolean enabled);
 }

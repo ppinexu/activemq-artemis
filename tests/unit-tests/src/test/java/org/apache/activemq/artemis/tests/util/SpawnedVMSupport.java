@@ -21,12 +21,15 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.file.Paths;
+import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import org.apache.activemq.artemis.tests.unit.UnitTestLogger;
@@ -36,6 +39,8 @@ import org.junit.Assert;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
 public final class SpawnedVMSupport {
+
+   static ConcurrentHashMap<Process, String> startedProcesses = null;
 
    private static final UnitTestLogger log = UnitTestLogger.LOGGER;
 
@@ -90,10 +95,66 @@ public final class SpawnedVMSupport {
                                  final boolean logErrorOutput,
                                  final boolean useLogging,
                                  final String... args) throws Exception {
-      ProcessBuilder builder = new ProcessBuilder();
+      return spawnVM(System.getProperty("java.class.path"), wordMatch, wordRunning, className, memoryArg1, memoryArg2, vmargs, logOutput, logErrorOutput, useLogging, args);
+
+   }
+
+   public static Process spawnVM(String classPath,
+                                 String wordMatch,
+                                 Runnable wordRunning,
+                                 String className,
+                                 String memoryArg1,
+                                 String memoryArg2,
+                                 String[] vmargs,
+                                 boolean logOutput,
+                                 boolean logErrorOutput,
+                                 boolean useLogging,
+                                 String... args) throws IOException, ClassNotFoundException {
+      return spawnVM(classPath, wordMatch, wordRunning, className, memoryArg1, memoryArg2, vmargs, logOutput, logErrorOutput, useLogging, -1, args);
+   }
+
+   /**
+    * @param classPath
+    * @param wordMatch
+    * @param wordRunning
+    * @param className
+    * @param memoryArg1
+    * @param memoryArg2
+    * @param vmargs
+    * @param logOutput
+    * @param logErrorOutput
+    * @param useLogging
+    * @param debugPort      if <=0 it means no debug
+    * @param args
+    * @return
+    * @throws IOException
+    * @throws ClassNotFoundException
+    */
+   public static Process spawnVM(String classPath,
+                                 String wordMatch,
+                                 Runnable wordRunning,
+                                 String className,
+                                 String memoryArg1,
+                                 String memoryArg2,
+                                 String[] vmargs,
+                                 boolean logOutput,
+                                 boolean logErrorOutput,
+                                 boolean useLogging,
+                                 long debugPort,
+                                 String... args) throws IOException, ClassNotFoundException {
       final String javaPath = Paths.get(System.getProperty("java.home"), "bin", "java").toAbsolutePath().toString();
+      ProcessBuilder builder = new ProcessBuilder();
+      if (memoryArg1 == null) {
+         memoryArg1 = "-Xms128m";
+      }
+      if (memoryArg2 == null) {
+         memoryArg2 = "-Xmx128m";
+      }
       builder.command(javaPath, memoryArg1, memoryArg2);
-      builder.environment().put("CLASSPATH", System.getProperty("java.class.path"));
+      if (debugPort > 0) {
+         builder.command().add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=" + debugPort);
+      }
+      builder.environment().put("CLASSPATH", classPath);
 
       List<String> commandList = builder.command();
 
@@ -142,8 +203,78 @@ public final class SpawnedVMSupport {
       ProcessLogger errorLogger = new ProcessLogger(logErrorOutput, process.getErrorStream(), className, wordMatch, wordRunning);
       errorLogger.start();
 
+      if (startedProcesses != null) {
+         startedProcesses.put(process, className);
+      }
       return process;
+   }
 
+   /**
+    * it will return a pair of dead / alive servers
+    *
+    * @return
+    */
+   private static HashSet<Process> getAliveProcesses() {
+
+      HashSet<Process> aliveProcess = new HashSet<>();
+
+      if (startedProcesses != null) {
+         for (;;) {
+            try {
+               aliveProcess.clear();
+               for (Process process : startedProcesses.keySet()) {
+                  if (process.isAlive()) {
+                     aliveProcess.add(process);
+                     process.destroyForcibly();
+                  }
+               }
+               break;
+            } catch (Throwable e) {
+               e.printStackTrace();
+            }
+         }
+      }
+
+      return aliveProcess;
+
+   }
+
+   public static void forceKill() {
+
+      HashSet<Process> aliveProcess = getAliveProcesses();
+
+      for (Process alive : aliveProcess) {
+         for (int i = 0; i < 5; i++) {
+            alive.destroyForcibly();
+            try {
+               alive.waitFor(5, TimeUnit.SECONDS);
+            } catch (Exception e) {
+            }
+         }
+      }
+
+   }
+
+   public static void enableCheck() {
+      startedProcesses = new ConcurrentHashMap<>();
+   }
+
+   public static void checkProcess() {
+
+      HashSet<Process> aliveProcess = getAliveProcesses();
+
+      try {
+         if (!aliveProcess.isEmpty()) {
+            StringBuffer buffer = new StringBuffer();
+            for (Process alive : aliveProcess) {
+               alive.destroyForcibly();
+               buffer.append(startedProcesses.get(alive) + " ");
+            }
+            Assert.fail("There are " + aliveProcess.size() + " processes alive :: " + buffer.toString());
+         }
+      } finally {
+         startedProcesses = null;
+      }
    }
 
    /**

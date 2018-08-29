@@ -35,13 +35,13 @@ public class ConsumerFilterPredicate extends ActiveMQFilterPredicate<ServerConsu
    }
 
    @Override
-   public boolean apply(ServerConsumer consumer) {
+   public boolean test(ServerConsumer consumer) {
       // Using switch over enum vs string comparison is better for perf.
       if (f == null)
          return true;
       switch (f) {
          case ID:
-            return matches(consumer.getID());
+            return matches(consumer.getSequentialID());
          case SESSION_ID:
             return matches(consumer.getSessionID());
          case USER:

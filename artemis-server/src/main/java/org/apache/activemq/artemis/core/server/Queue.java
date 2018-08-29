@@ -27,6 +27,8 @@ import org.apache.activemq.artemis.api.core.RoutingType;
 import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.core.filter.Filter;
 import org.apache.activemq.artemis.core.paging.cursor.PageSubscription;
+import org.apache.activemq.artemis.core.persistence.OperationContext;
+import org.apache.activemq.artemis.core.postoffice.Binding;
 import org.apache.activemq.artemis.core.server.impl.AckReason;
 import org.apache.activemq.artemis.core.transaction.Transaction;
 import org.apache.activemq.artemis.utils.ReferenceCounter;
@@ -51,6 +53,13 @@ public interface Queue extends Bindable,CriticalComponent {
 
    boolean isDurable();
 
+   /**
+    * The queue definition could be durable, but the messages could eventually be considered non durable.
+    * (e.g. purgeOnNoConsumers)
+    * @return
+    */
+   boolean isDurableMessage();
+
    boolean isTemporary();
 
    boolean isAutoCreated();
@@ -58,6 +67,26 @@ public interface Queue extends Bindable,CriticalComponent {
    boolean isPurgeOnNoConsumers();
 
    void setPurgeOnNoConsumers(boolean value);
+
+   int getConsumersBeforeDispatch();
+
+   void setConsumersBeforeDispatch(int consumersBeforeDispatch);
+
+   long getDelayBeforeDispatch();
+
+   void setDelayBeforeDispatch(long delayBeforeDispatch);
+
+   long getDispatchStartTime();
+
+   boolean isDispatching();
+
+   void setDispatching(boolean dispatching);
+
+   boolean isExclusive();
+
+   void setExclusive(boolean value);
+
+   boolean isLastValue();
 
    int getMaxConsumers();
 
@@ -92,11 +121,13 @@ public interface Queue extends Bindable,CriticalComponent {
 
    void acknowledge(MessageReference ref) throws Exception;
 
-   void acknowledge(MessageReference ref, AckReason reason) throws Exception;
+   void acknowledge(MessageReference ref, ServerConsumer consumer) throws Exception;
+
+   void acknowledge(MessageReference ref, AckReason reason, ServerConsumer consumer) throws Exception;
 
    void acknowledge(Transaction tx, MessageReference ref) throws Exception;
 
-   void acknowledge(Transaction tx, MessageReference ref, AckReason reason) throws Exception;
+   void acknowledge(Transaction tx, MessageReference ref, AckReason reason, ServerConsumer consumer) throws Exception;
 
    void reacknowledge(Transaction tx, MessageReference ref) throws Exception;
 
@@ -123,11 +154,41 @@ public interface Queue extends Bindable,CriticalComponent {
 
    long getMessageCount();
 
+   /**
+    * This is the size of the messages in the queue when persisted on disk which is used for metrics tracking
+    * to give an idea of the amount of data on the queue to be consumed
+    *
+    * Note that this includes all messages on the queue, even messages that are non-durable which may only be in memory
+    */
+   long getPersistentSize();
+
+   /**
+    * This is the number of the durable messages in the queue
+    */
+   long getDurableMessageCount();
+
+   /**
+    * This is the persistent size of all the durable messages in the queue
+    */
+   long getDurablePersistentSize();
+
    int getDeliveringCount();
 
-   void referenceHandled();
+   long getDeliveringSize();
+
+   int getDurableDeliveringCount();
+
+   long getDurableDeliveringSize();
+
+   void referenceHandled(MessageReference ref);
 
    int getScheduledCount();
+
+   long getScheduledSize();
+
+   int getDurableScheduledCount();
+
+   long getDurableScheduledSize();
 
    List<MessageReference> getScheduledMessages();
 
@@ -159,7 +220,11 @@ public interface Queue extends Bindable,CriticalComponent {
 
    int deleteMatchingReferences(Filter filter) throws Exception;
 
-   int deleteMatchingReferences(int flushLImit, Filter filter) throws Exception;
+   default int deleteMatchingReferences(int flushLImit, Filter filter) throws Exception {
+      return deleteMatchingReferences(flushLImit, filter, AckReason.NORMAL);
+   }
+
+   int deleteMatchingReferences(int flushLImit, Filter filter, AckReason ackReason) throws Exception;
 
    boolean expireReference(long messageID) throws Exception;
 
@@ -172,6 +237,8 @@ public interface Queue extends Bindable,CriticalComponent {
 
    void expire(MessageReference ref) throws Exception;
 
+   void expire(MessageReference ref, ServerConsumer consumer) throws Exception;
+
    boolean sendMessageToDeadLetterAddress(long messageID) throws Exception;
 
    int sendMessagesToDeadLetterAddress(Filter filter) throws Exception;
@@ -182,16 +249,15 @@ public interface Queue extends Bindable,CriticalComponent {
 
    int changeReferencesPriority(Filter filter, byte newPriority) throws Exception;
 
-   boolean moveReference(long messageID, SimpleString toAddress) throws Exception;
+   boolean moveReference(long messageID, SimpleString toAddress, Binding binding, boolean rejectDuplicates) throws Exception;
 
-   boolean moveReference(long messageID, SimpleString toAddress, boolean rejectDuplicates) throws Exception;
-
-   int moveReferences(Filter filter, SimpleString toAddress) throws Exception;
+   int moveReferences(Filter filter, SimpleString toAddress, Binding binding) throws Exception;
 
    int moveReferences(int flushLimit,
                       Filter filter,
                       SimpleString toAddress,
-                      boolean rejectDuplicates) throws Exception;
+                      boolean rejectDuplicates,
+                      Binding binding) throws Exception;
 
    int retryMessages(Filter filter) throws Exception;
 
@@ -202,6 +268,14 @@ public interface Queue extends Bindable,CriticalComponent {
    boolean hasMatchingConsumer(Message message);
 
    Collection<Consumer> getConsumers();
+
+   Map<SimpleString, Consumer> getGroups();
+
+   void resetGroup(SimpleString groupID);
+
+   void resetAllGroups();
+
+   int getGroupCount();
 
    boolean checkRedelivery(MessageReference ref, long timeBase, boolean ignoreRedeliveryDelay) throws Exception;
 
@@ -292,10 +366,16 @@ public interface Queue extends Bindable,CriticalComponent {
    float getRate();
 
    /**
-    * @return the user who created this queue
+    * @return the user associated with this queue
     */
    SimpleString getUser();
 
-   void decDelivering(int size);
+   /**
+    * @param user the user associated with this queue
+    */
+   void setUser(SimpleString user);
+
+   /** This is to perform a check on the counter again */
+   void recheckRefCount(OperationContext context);
 
 }

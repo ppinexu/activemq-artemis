@@ -16,6 +16,8 @@
  */
 package org.apache.activemq.artemis.api.core.management;
 
+import java.util.Map;
+
 /**
  * A BridgeControl is used to manage a Bridge.
  */
@@ -50,6 +52,18 @@ public interface BridgeControl extends ActiveMQComponentControl {
     */
    @Attribute(desc = "name of the org.apache.activemq.artemis.core.server.cluster.Transformer implementation associated with this bridge")
    String getTransformerClassName();
+
+   /**
+    * Returns a map of the properties configured for the transformer.
+    */
+   @Attribute(desc = "map of key, value pairs used to configure the transformer in JSON form")
+   String getTransformerPropertiesAsJSON() throws Exception;
+
+   /**
+    * Returns a map of the properties configured for the transformer.
+    */
+   @Attribute(desc = "map of key, value pairs used to configure the transformer")
+   Map<String, String> getTransformerProperties() throws Exception;
 
    /**
     * Returns any list of static connectors used by this bridge
@@ -92,4 +106,33 @@ public interface BridgeControl extends ActiveMQComponentControl {
     */
    @Attribute(desc = "whether this bridge is using high availability")
    boolean isHA();
+
+   /**
+    * The messagesPendingAcknowledgement counter is incremented when the bridge is has forwarded a message but
+    * is waiting acknowledgement from the other broker. This is a cumulative total and the number of outstanding
+    * pending messages can be computed by subtracting messagesAcknowledged from messagesPendingAcknowledgement.
+    *
+    */
+   @Attribute(desc = "The messagesPendingAcknowledgement counter is incremented when the bridge is has forwarded a message but is waiting acknowledgement from the remote broker.")
+   long getMessagesPendingAcknowledgement();
+
+   /**
+    * The messagesAcknowledged counter is the number of messages actually received by the remote broker.
+    * This is a cumulative total and the number of outstanding pending messages can be computed by subtracting
+    * messagesAcknowledged from messagesPendingAcknowledgement.
+    *
+    */
+   @Attribute(desc = "The messagesAcknowledged counter is the number of messages actually received by the remote broker.")
+   long getMessagesAcknowledged();
+
+   /**
+    * The bridge metrics for this bridge
+    *
+    * The messagesPendingAcknowledgement counter is incremented when the bridge is has forwarded a message but is waiting acknowledgement from the other broker.
+    * The messagesAcknowledged counter is the number of messages actually received by the remote broker.
+    *
+    */
+   @Attribute(desc = "The metrics for this bridge. The messagesPendingAcknowledgement counter is incremented when the bridge is has forwarded a message but is waiting acknowledgement from the remote broker. The messagesAcknowledged counter is the number of messages actually received by the remote broker.")
+   Map<String, Object> getMetrics();
+
 }

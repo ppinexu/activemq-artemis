@@ -55,6 +55,7 @@ import org.apache.activemq.artemis.api.core.ActiveMQInterruptedException;
 import org.apache.activemq.artemis.api.core.client.FailoverEventListener;
 import org.apache.activemq.artemis.api.core.client.FailoverEventType;
 import org.apache.activemq.artemis.api.jms.ActiveMQJMSConstants;
+import org.apache.activemq.artemis.core.client.impl.ClientSessionInternal;
 import org.apache.activemq.artemis.jms.bridge.ActiveMQJMSBridgeLogger;
 import org.apache.activemq.artemis.jms.bridge.ConnectionFactoryFactory;
 import org.apache.activemq.artemis.jms.bridge.DestinationFactory;
@@ -68,9 +69,7 @@ import org.apache.activemq.artemis.jms.server.ActiveMQJMSServerBundle;
 import org.apache.activemq.artemis.service.extensions.ServiceUtils;
 import org.apache.activemq.artemis.service.extensions.xa.recovery.ActiveMQRegistry;
 import org.apache.activemq.artemis.service.extensions.xa.recovery.XARecoveryConfig;
-import org.apache.activemq.artemis.utils.DefaultSensitiveStringCodec;
 import org.apache.activemq.artemis.utils.PasswordMaskingUtil;
-import org.apache.activemq.artemis.utils.SensitiveDataCodec;
 
 public final class JMSBridgeImpl implements JMSBridge {
 
@@ -167,7 +166,7 @@ public final class JMSBridgeImpl implements JMSBridge {
 
    private ObjectName objectName;
 
-   private boolean useMaskedPassword = false;
+   private Boolean useMaskedPassword;
 
    private String passwordCodec;
 
@@ -439,25 +438,16 @@ public final class JMSBridgeImpl implements JMSBridge {
    }
 
    private void initPasswords() throws ActiveMQException {
-      if (useMaskedPassword) {
-         SensitiveDataCodec<String> codecInstance = new DefaultSensitiveStringCodec();
-
-         if (passwordCodec != null) {
-            codecInstance = PasswordMaskingUtil.getCodec(passwordCodec);
+      try {
+         if (this.sourcePassword != null) {
+            sourcePassword = PasswordMaskingUtil.resolveMask(useMaskedPassword, sourcePassword, passwordCodec);
          }
 
-         try {
-            if (this.sourcePassword != null) {
-               sourcePassword = codecInstance.decode(sourcePassword);
-            }
-
-            if (this.targetPassword != null) {
-               targetPassword = codecInstance.decode(targetPassword);
-            }
-         } catch (Exception e) {
-            throw ActiveMQJMSServerBundle.BUNDLE.errorDecodingPassword(e);
+         if (this.targetPassword != null) {
+            targetPassword = PasswordMaskingUtil.resolveMask(useMaskedPassword, targetPassword, passwordCodec);
          }
-
+      } catch (Exception e) {
+         throw ActiveMQJMSServerBundle.BUNDLE.errorDecodingPassword(e);
       }
    }
 
@@ -497,6 +487,8 @@ public final class JMSBridgeImpl implements JMSBridge {
                ActiveMQJMSBridgeLogger.LOGGER.trace("Rolling back remaining tx");
             }
 
+            stopSessionFailover();
+
             try {
                tx.rollback();
                abortedMessageCount += messages.size();
@@ -533,6 +525,14 @@ public final class JMSBridgeImpl implements JMSBridge {
             ActiveMQJMSBridgeLogger.LOGGER.trace("Stopped " + this);
          }
       }
+   }
+
+   private void stopSessionFailover() {
+      XASession xaSource = (XASession) sourceSession;
+      XASession xaTarget = (XASession) targetSession;
+
+      ((ClientSessionInternal) xaSource.getXAResource()).getSessionContext().releaseCommunications();
+      ((ClientSessionInternal) xaTarget.getXAResource()).getSessionContext().releaseCommunications();
    }
 
    @Override
@@ -954,65 +954,76 @@ public final class JMSBridgeImpl implements JMSBridge {
                                        final String clientID,
                                        final boolean isXA,
                                        boolean isSource) throws Exception {
-      Connection conn;
+      Connection conn = null;
 
-      Object cf = cff.createConnectionFactory();
+      try {
 
-      if (cf instanceof ActiveMQConnectionFactory && registry != null) {
-         registry.register(XARecoveryConfig.newConfig((ActiveMQConnectionFactory) cf, username, password, null));
-      }
+         Object cf = cff.createConnectionFactory();
 
-      if (qualityOfServiceMode == QualityOfServiceMode.ONCE_AND_ONLY_ONCE && !(cf instanceof XAConnectionFactory)) {
-         throw new IllegalArgumentException("Connection factory must be XAConnectionFactory");
-      }
+         if (cf instanceof ActiveMQConnectionFactory && registry != null) {
+            registry.register(XARecoveryConfig.newConfig((ActiveMQConnectionFactory) cf, username, password, null));
+         }
 
-      if (username == null) {
-         if (isXA) {
-            if (JMSBridgeImpl.trace) {
-               ActiveMQJMSBridgeLogger.LOGGER.trace("Creating an XA connection");
+         if (qualityOfServiceMode == QualityOfServiceMode.ONCE_AND_ONLY_ONCE && !(cf instanceof XAConnectionFactory)) {
+            throw new IllegalArgumentException("Connection factory must be XAConnectionFactory");
+         }
+
+         if (username == null) {
+            if (isXA) {
+               if (JMSBridgeImpl.trace) {
+                  ActiveMQJMSBridgeLogger.LOGGER.trace("Creating an XA connection");
+               }
+               conn = ((XAConnectionFactory) cf).createXAConnection();
+            } else {
+               if (JMSBridgeImpl.trace) {
+                  ActiveMQJMSBridgeLogger.LOGGER.trace("Creating a non XA connection");
+               }
+               conn = ((ConnectionFactory) cf).createConnection();
             }
-            conn = ((XAConnectionFactory) cf).createXAConnection();
          } else {
-            if (JMSBridgeImpl.trace) {
-               ActiveMQJMSBridgeLogger.LOGGER.trace("Creating a non XA connection");
+            if (isXA) {
+               if (JMSBridgeImpl.trace) {
+                  ActiveMQJMSBridgeLogger.LOGGER.trace("Creating an XA connection");
+               }
+               conn = ((XAConnectionFactory) cf).createXAConnection(username, password);
+            } else {
+               if (JMSBridgeImpl.trace) {
+                  ActiveMQJMSBridgeLogger.LOGGER.trace("Creating a non XA connection");
+               }
+               conn = ((ConnectionFactory) cf).createConnection(username, password);
             }
-            conn = ((ConnectionFactory) cf).createConnection();
          }
-      } else {
-         if (isXA) {
-            if (JMSBridgeImpl.trace) {
-               ActiveMQJMSBridgeLogger.LOGGER.trace("Creating an XA connection");
+
+         if (clientID != null) {
+            conn.setClientID(clientID);
+         }
+
+         boolean ha = false;
+         BridgeFailoverListener failoverListener = null;
+
+         if (conn instanceof ActiveMQConnection) {
+            ActiveMQConnectionFactory activeMQCF = (ActiveMQConnectionFactory) cf;
+            ha = activeMQCF.isHA();
+
+            if (ha) {
+               ActiveMQConnection activeMQConn = (ActiveMQConnection) conn;
+               failoverListener = new BridgeFailoverListener(isSource);
+               activeMQConn.setFailoverListener(failoverListener);
             }
-            conn = ((XAConnectionFactory) cf).createXAConnection(username, password);
-         } else {
-            if (JMSBridgeImpl.trace) {
-               ActiveMQJMSBridgeLogger.LOGGER.trace("Creating a non XA connection");
+         }
+
+         conn.setExceptionListener(new BridgeExceptionListener(ha, failoverListener, isSource));
+
+         return conn;
+      } catch (JMSException e) {
+         try {
+            if (conn != null) {
+               conn.close();
             }
-            conn = ((ConnectionFactory) cf).createConnection(username, password);
+         } catch (Throwable ignored) {
          }
+         throw e;
       }
-
-      if (clientID != null) {
-         conn.setClientID(clientID);
-      }
-
-      boolean ha = false;
-      BridgeFailoverListener failoverListener = null;
-
-      if (conn instanceof ActiveMQConnection) {
-         ActiveMQConnectionFactory activeMQCF = (ActiveMQConnectionFactory) cf;
-         ha = activeMQCF.isHA();
-
-         if (ha) {
-            ActiveMQConnection activeMQConn = (ActiveMQConnection) conn;
-            failoverListener = new BridgeFailoverListener(isSource);
-            activeMQConn.setFailoverListener(failoverListener);
-         }
-      }
-
-      conn.setExceptionListener(new BridgeExceptionListener(ha, failoverListener, isSource));
-
-      return conn;
    }
 
    /*

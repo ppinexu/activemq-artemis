@@ -60,6 +60,12 @@ public class ActiveMQProtonRemotingConnection extends AbstractRemotingConnection
       return manager;
    }
 
+
+   @Override
+   public void scheduledFlush() {
+      amqpConnection.scheduledFlush();
+   }
+
    /*
     * This can be called concurrently by more than one thread so needs to be locked
     */
@@ -173,6 +179,16 @@ public class ActiveMQProtonRemotingConnection extends AbstractRemotingConnection
 
    @Override
    public String getClientID() {
-      return amqpConnection.getContainer();
+      return amqpConnection.getRemoteContainer();
    }
+
+   public void open() {
+      amqpConnection.open();
+   }
+
+   @Override
+   public String getTransportLocalAddress() {
+      return getTransportConnection().getLocalAddress();
+   }
+
 }

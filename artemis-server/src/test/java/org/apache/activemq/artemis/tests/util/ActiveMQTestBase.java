@@ -34,8 +34,6 @@ import java.io.InputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.OutputStream;
-import java.io.PrintWriter;
-import java.io.StringWriter;
 import java.lang.management.ManagementFactory;
 import java.lang.ref.WeakReference;
 import java.net.ServerSocket;
@@ -62,6 +60,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.apache.activemq.artemis.api.config.ActiveMQDefaultConfiguration;
 import org.apache.activemq.artemis.api.core.ActiveMQBuffer;
 import org.apache.activemq.artemis.api.core.ActiveMQException;
 import org.apache.activemq.artemis.api.core.ActiveMQExceptionType;
@@ -136,12 +135,14 @@ import org.apache.activemq.artemis.spi.core.security.ActiveMQJAASSecurityManager
 import org.apache.activemq.artemis.spi.core.security.ActiveMQSecurityManager;
 import org.apache.activemq.artemis.spi.core.security.jaas.InVMLoginModule;
 import org.apache.activemq.artemis.utils.ActiveMQThreadFactory;
+import org.apache.activemq.artemis.utils.CleanupSystemPropertiesRule;
 import org.apache.activemq.artemis.utils.Env;
 import org.apache.activemq.artemis.utils.FileUtil;
-import org.apache.activemq.artemis.utils.actors.OrderedExecutorFactory;
 import org.apache.activemq.artemis.utils.RandomUtil;
+import org.apache.activemq.artemis.utils.ThreadDumpUtil;
 import org.apache.activemq.artemis.utils.ThreadLeakCheckRule;
 import org.apache.activemq.artemis.utils.UUIDGenerator;
+import org.apache.activemq.artemis.utils.actors.OrderedExecutorFactory;
 import org.jboss.logging.Logger;
 import org.junit.After;
 import org.junit.Assert;
@@ -164,8 +165,13 @@ public abstract class ActiveMQTestBase extends Assert {
 
    private static final Logger logger = Logger.getLogger(ActiveMQTestBase.class);
 
+   /** This will make sure threads are not leaking between tests */
    @Rule
    public ThreadLeakCheckRule leakCheckRule = new ThreadLeakCheckRule();
+
+   /** This will cleanup any system property changed inside tests */
+   @Rule
+   public CleanupSystemPropertiesRule propertiesRule = new CleanupSystemPropertiesRule();
 
    public static final String TARGET_TMP = "./target/tmp";
    public static final String INVM_ACCEPTOR_FACTORY = InVMAcceptorFactory.class.getCanonicalName();
@@ -215,12 +221,12 @@ public abstract class ActiveMQTestBase extends Assert {
    public TestRule watcher = new TestWatcher() {
       @Override
       protected void starting(Description description) {
-         log.info(String.format("#*#*# Starting test: %s()...", description.getMethodName()));
+         log.info(String.format("**** start #test %s() ***", description.getMethodName()));
       }
 
       @Override
       protected void finished(Description description) {
-         log.info(String.format("#*#*# Finished test: %s()...", description.getMethodName()));
+         log.info(String.format("**** end #test %s() ***", description.getMethodName()));
       }
    };
 
@@ -303,8 +309,9 @@ public abstract class ActiveMQTestBase extends Assert {
          //clean up pools before failing
          if (!exceptions.isEmpty()) {
             for (Exception exception : exceptions) {
-               exception.printStackTrace();
+               exception.printStackTrace(System.out);
             }
+            System.out.println(threadDump("Thread dump with reconnects happening"));
             fail("Client Session Factories still trying to reconnect, see above to see where created");
          }
          Map<Thread, StackTraceElement[]> threadMap = Thread.getAllStackTraces();
@@ -359,8 +366,6 @@ public abstract class ActiveMQTestBase extends Assert {
       InVMRegistry.instance.clear();
 
       // checkFreePort(TransportConstants.DEFAULT_PORT);
-
-      logAndSystemOut("#test " + getName());
    }
 
    public static void assertEqualsByteArrays(final byte[] expected, final byte[] actual) {
@@ -461,6 +466,10 @@ public abstract class ActiveMQTestBase extends Assert {
    }
 
    protected void setDBStoreType(Configuration configuration) {
+      configuration.setStoreConfiguration(createDefaultDatabaseStorageConfiguration());
+   }
+
+   protected DatabaseStorageConfiguration createDefaultDatabaseStorageConfiguration() {
       DatabaseStorageConfiguration dbStorageConfiguration = new DatabaseStorageConfiguration();
       dbStorageConfiguration.setJdbcConnectionUrl(getTestJDBCConnectionUrl());
       dbStorageConfiguration.setBindingsTableName("BINDINGS");
@@ -468,8 +477,22 @@ public abstract class ActiveMQTestBase extends Assert {
       dbStorageConfiguration.setLargeMessageTableName("LARGE_MESSAGE");
       dbStorageConfiguration.setPageStoreTableName("PAGE_STORE");
       dbStorageConfiguration.setJdbcDriverClassName(getJDBCClassName());
+      dbStorageConfiguration.setJdbcLockAcquisitionTimeoutMillis(getJdbcLockAcquisitionTimeoutMillis());
+      dbStorageConfiguration.setJdbcLockExpirationMillis(getJdbcLockExpirationMillis());
+      dbStorageConfiguration.setJdbcLockRenewPeriodMillis(getJdbcLockRenewPeriodMillis());
+      return dbStorageConfiguration;
+   }
 
-      configuration.setStoreConfiguration(dbStorageConfiguration);
+   protected long getJdbcLockAcquisitionTimeoutMillis() {
+      return Long.getLong("jdbc.lock.acquisition", ActiveMQDefaultConfiguration.getDefaultJdbcLockAcquisitionTimeoutMillis());
+   }
+
+   protected long getJdbcLockExpirationMillis() {
+      return Long.getLong("jdbc.lock.expiration", ActiveMQDefaultConfiguration.getDefaultJdbcLockExpirationMillis());
+   }
+
+   protected long getJdbcLockRenewPeriodMillis() {
+      return Long.getLong("jdbc.lock.renew", ActiveMQDefaultConfiguration.getDefaultJdbcLockRenewPeriodMillis());
    }
 
    public void destroyTables(List<String> tableNames) throws Exception {
@@ -489,6 +512,7 @@ public abstract class ActiveMQTestBase extends Assert {
                connection.rollback();
             }
          }
+         connection.setAutoCommit(true);
       } catch (Throwable e) {
          e.printStackTrace();
       } finally {
@@ -619,34 +643,9 @@ public abstract class ActiveMQTestBase extends Assert {
    }
 
    public static String threadDump(final String msg) {
-      StringWriter str = new StringWriter();
-      PrintWriter out = new PrintWriter(str);
 
-      Map<Thread, StackTraceElement[]> stackTrace = Thread.getAllStackTraces();
+      return ThreadDumpUtil.threadDump(msg);
 
-      out.println("*******************************************************************************");
-      out.println("Complete Thread dump " + msg);
-
-      for (Map.Entry<Thread, StackTraceElement[]> el : stackTrace.entrySet()) {
-         out.println("===============================================================================");
-         out.println("Thread " + el.getKey() +
-                        " name = " +
-                        el.getKey().getName() +
-                        " id = " +
-                        el.getKey().getId() +
-                        " group = " +
-                        el.getKey().getThreadGroup());
-         out.println();
-         for (StackTraceElement traceEl : el.getValue()) {
-            out.println(traceEl);
-         }
-      }
-
-      out.println("===============================================================================");
-      out.println("End Thread dump " + msg);
-      out.println("*******************************************************************************");
-
-      return str.toString();
    }
 
    /**
@@ -1138,7 +1137,6 @@ public abstract class ActiveMQTestBase extends Assert {
          for (TopologyMemberImpl member : topology.getMembers()) {
             if (member.getLive() != null) {
                liveNodesCount++;
-               ActiveMQServerLogger.LOGGER.info("Found live server connected to " + server.getNodeID());
             }
             if (member.getBackup() != null) {
                backupNodesCount++;
@@ -1263,7 +1261,7 @@ public abstract class ActiveMQTestBase extends Assert {
       }
       if (params == null)
          params = new HashMap<>();
-      return new TransportConfiguration(className, params);
+      return new TransportConfiguration(className, params, UUIDGenerator.getInstance().generateStringUUID(), new HashMap<String, Object>());
    }
 
    protected void waitForServerToStart(ActiveMQServer server) throws InterruptedException {
@@ -1311,7 +1309,7 @@ public abstract class ActiveMQTestBase extends Assert {
     * @param backup
     */
    public static final void waitForRemoteBackupSynchronization(final ActiveMQServer backup) {
-      waitForRemoteBackup(null, 10, true, backup);
+      waitForRemoteBackup(null, 20, true, backup);
    }
 
    /**
@@ -1329,6 +1327,10 @@ public abstract class ActiveMQTestBase extends Assert {
       final long toWait = seconds * 1000;
       final long time = System.currentTimeMillis();
       int loop = 0;
+      //Note: if maxLoop is too small there won't be
+      //enough time for quorum vote to complete and
+      //will cause test to fail.
+      final int maxLoop = 40;
       while (true) {
          Activation activation = actualServer.getActivation();
          boolean isReplicated = !backup.getHAPolicy().isSharedStore();
@@ -1340,7 +1342,7 @@ public abstract class ActiveMQTestBase extends Assert {
                //we may have already failed over and changed the Activation
                if (actualServer.isStarted()) {
                   //let it fail a few time to have time to start stopping in the case of waiting to failback
-                  isRemoteUpToDate = loop++ > 10;
+                  isRemoteUpToDate = loop++ > maxLoop;
                } else {
                   //we could be waiting to failback or restart if the server is stopping
                   isRemoteUpToDate = false;
@@ -1353,10 +1355,12 @@ public abstract class ActiveMQTestBase extends Assert {
             break;
          }
          if (System.currentTimeMillis() > (time + toWait)) {
+            String threadDump = threadDump("can't get synchronization finished " + backup.isReplicaSync());
+            System.err.println(threadDump);
             fail("backup started? (" + actualServer.isStarted() + "). Finished synchronizing (" +
                     (activation) + "). SessionFactory!=null ? " + (sessionFactory != null) +
                     " || sessionFactory.getBackupConnector()==" +
-                    (sessionFactory != null ? sessionFactory.getBackupConnector() : "not-applicable"));
+                    (sessionFactory != null ? sessionFactory.getBackupConnector() : "not-applicable") + "\n" + threadDump);
          }
          try {
             Thread.sleep(100);
@@ -2135,6 +2139,20 @@ public abstract class ActiveMQTestBase extends Assert {
    protected ClientMessage createTextMessage(final ClientSession session, final String s, final boolean durable) {
       ClientMessage message = session.createMessage(Message.TEXT_TYPE, durable, 0, System.currentTimeMillis(), (byte) 4);
       message.getBodyBuffer().writeString(s);
+      return message;
+   }
+
+   protected ClientMessage createTextMessage(final ClientSession session, final boolean durable, final int numChars) {
+      ClientMessage message = session.createMessage(Message.TEXT_TYPE,
+                durable,
+                0,
+                System.currentTimeMillis(),
+                (byte)4);
+      StringBuilder builder = new StringBuilder();
+      for (int i = 0; i < numChars; i++) {
+         builder.append('a');
+      }
+      message.getBodyBuffer().writeString(builder.toString());
       return message;
    }
 

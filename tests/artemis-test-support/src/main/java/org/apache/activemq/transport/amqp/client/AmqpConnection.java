@@ -33,8 +33,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.activemq.transport.InactivityIOException;
+import org.apache.activemq.transport.netty.NettyTransport;
 import org.apache.activemq.transport.amqp.client.sasl.SaslAuthenticator;
-import org.apache.activemq.transport.amqp.client.transport.NettyTransportListener;
+import org.apache.activemq.transport.netty.NettyTransportListener;
 import org.apache.activemq.transport.amqp.client.util.AsyncResult;
 import org.apache.activemq.transport.amqp.client.util.ClientFuture;
 import org.apache.activemq.transport.amqp.client.util.IdGenerator;
@@ -48,6 +49,7 @@ import org.apache.qpid.proton.engine.EndpointState;
 import org.apache.qpid.proton.engine.Event;
 import org.apache.qpid.proton.engine.Event.Type;
 import org.apache.qpid.proton.engine.Sasl;
+import org.apache.qpid.proton.engine.Session;
 import org.apache.qpid.proton.engine.Transport;
 import org.apache.qpid.proton.engine.impl.CollectorImpl;
 import org.apache.qpid.proton.engine.impl.TransportImpl;
@@ -80,7 +82,7 @@ public class AmqpConnection extends AmqpAbstractResource<Connection> implements 
    private final AtomicLong sessionIdGenerator = new AtomicLong();
    private final AtomicLong txIdGenerator = new AtomicLong();
    private final Collector protonCollector = new CollectorImpl();
-   private final org.apache.activemq.transport.amqp.client.transport.NettyTransport transport;
+   private final NettyTransport transport;
    private final Transport protonTransport = Transport.Factory.create();
 
    private final String username;
@@ -102,14 +104,16 @@ public class AmqpConnection extends AmqpAbstractResource<Connection> implements 
    private boolean idleProcessingDisabled;
    private String containerId;
    private boolean authenticated;
+   private int maxFrameSize = DEFAULT_MAX_FRAME_SIZE;
    private int channelMax = DEFAULT_CHANNEL_MAX;
+   private int sessionIncomingCapacity = 0;
    private long connectTimeout = DEFAULT_CONNECT_TIMEOUT;
    private long closeTimeout = DEFAULT_CLOSE_TIMEOUT;
    private long drainTimeout = DEFAULT_DRAIN_TIMEOUT;
    private boolean trace;
    private boolean noContainerID = false;
 
-   public AmqpConnection(org.apache.activemq.transport.amqp.client.transport.NettyTransport transport, String username, String password) {
+   public AmqpConnection(NettyTransport transport, String username, String password) {
       setEndpoint(Connection.Factory.create());
       getEndpoint().collect(protonCollector);
 
@@ -165,6 +169,7 @@ public class AmqpConnection extends AmqpAbstractResource<Connection> implements 
                }
                protonTransport.setMaxFrameSize(getMaxFrameSize());
                protonTransport.setChannelMax(getChannelMax());
+               protonTransport.setEmitFlowEventOnSend(false);
                protonTransport.bind(getEndpoint());
                Sasl sasl = protonTransport.sasl();
                if (sasl != null) {
@@ -276,7 +281,9 @@ public class AmqpConnection extends AmqpAbstractResource<Connection> implements 
          @Override
          public void run() {
             checkClosed();
-            session.setEndpoint(getEndpoint().session());
+            Session protonSession = getEndpoint().session();
+            protonSession.setIncomingCapacity(sessionIncomingCapacity);
+            session.setEndpoint(protonSession);
             session.setStateInspector(getStateInspector());
             session.open(request);
             pumpToProtonTransport(request);
@@ -365,7 +372,11 @@ public class AmqpConnection extends AmqpAbstractResource<Connection> implements 
     * @return the currently set Max Frame Size value.
     */
    public int getMaxFrameSize() {
-      return DEFAULT_MAX_FRAME_SIZE;
+      return maxFrameSize;
+   }
+
+   public void setMaxFrameSize(int maxFrameSize) {
+      this.maxFrameSize = maxFrameSize;
    }
 
    public int getChannelMax() {
@@ -374,6 +385,14 @@ public class AmqpConnection extends AmqpAbstractResource<Connection> implements 
 
    public void setChannelMax(int channelMax) {
       this.channelMax = channelMax;
+   }
+
+   public int getSessionIncomingCapacity() {
+      return sessionIncomingCapacity;
+   }
+
+   public void setSessionIncomingCapacity(int capacity) {
+      this.sessionIncomingCapacity = capacity;
    }
 
    public long getConnectTimeout() {

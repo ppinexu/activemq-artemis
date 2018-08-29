@@ -208,6 +208,9 @@ public final class JsonUtil {
          jsonObjectBuilder.add(key, param.toString());
       } else if (param == null) {
          jsonObjectBuilder.addNull(key);
+      } else if (param instanceof byte[]) {
+         JsonArrayBuilder byteArrayObject = toJsonArrayBuilder((byte[]) param);
+         jsonObjectBuilder.add(key, byteArrayObject);
       } else {
          throw ActiveMQClientMessageBundle.BUNDLE.invalidManagementParam(param.getClass().getName());
       }
@@ -233,6 +236,9 @@ public final class JsonUtil {
          jsonArrayBuilder.add(((Byte) param).shortValue());
       } else if (param == null) {
          jsonArrayBuilder.addNull();
+      } else if (param instanceof byte[]) {
+         JsonArrayBuilder byteArrayObject = toJsonArrayBuilder((byte[]) param);
+         jsonArrayBuilder.add(byteArrayObject);
       } else {
          throw ActiveMQClientMessageBundle.BUNDLE.invalidManagementParam(param.getClass().getName());
       }
@@ -248,14 +254,24 @@ public final class JsonUtil {
       return array.build();
    }
 
-   public static JsonObject toJsonObject(Map<String, Object> map) {
+   public static JsonObject toJsonObject(Map<String, ?> map) {
       JsonObjectBuilder jsonObjectBuilder = JsonLoader.createObjectBuilder();
       if (map != null) {
-         for (Map.Entry<String, Object> entry : map.entrySet()) {
-            addToObject(entry.getKey(), entry.getValue(), jsonObjectBuilder);
+         for (Map.Entry<String, ?> entry : map.entrySet()) {
+            addToObject(String.valueOf(entry.getKey()), entry.getValue(), jsonObjectBuilder);
          }
       }
       return jsonObjectBuilder.build();
+   }
+
+   public static JsonArrayBuilder toJsonArrayBuilder(byte[] byteArray) {
+      JsonArrayBuilder jsonArrayBuilder = JsonLoader.createArrayBuilder();
+      if (byteArray != null) {
+         for (int i = 0; i < byteArray.length; i++) {
+            jsonArrayBuilder.add(((Byte) byteArray[i]).shortValue());
+         }
+      }
+      return jsonArrayBuilder;
    }
 
    public static JsonArray readJsonArray(String jsonString) {
@@ -264,6 +280,14 @@ public final class JsonUtil {
 
    public static JsonObject readJsonObject(String jsonString) {
       return Json.createReader(new StringReader(jsonString)).readObject();
+   }
+
+   public static Map<String, String> readJsonProperties(String jsonString) {
+      Map<String, String> properties = new HashMap<>();
+      if (jsonString != null) {
+         JsonUtil.readJsonObject(jsonString).forEach((k, v) -> properties.put(k, v.toString()));
+      }
+      return properties;
    }
 
    public static Object convertJsonValue(Object jsonValue, Class desiredType) {

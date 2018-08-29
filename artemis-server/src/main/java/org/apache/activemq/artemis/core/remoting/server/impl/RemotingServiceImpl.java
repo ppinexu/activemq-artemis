@@ -515,7 +515,9 @@ public class RemotingServiceImpl implements RemotingService, ServerConnectionLif
 
       ConnectionEntry entry = protocol.createConnectionEntry((Acceptor) component, connection);
       try {
-         server.callBrokerPlugins(server.hasBrokerPlugins() ? plugin -> plugin.afterCreateConnection(entry.connection) : null);
+         if (server.hasBrokerConnectionPlugins()) {
+            server.callBrokerConnectionPlugins(plugin -> plugin.afterCreateConnection(entry.connection));
+         }
       } catch (ActiveMQException t) {
          logger.warn("Error executing afterCreateConnection plugin method: {}", t.getMessage(), t);
          throw new IllegalStateException(t.getMessage(), t.getCause());
@@ -537,33 +539,32 @@ public class RemotingServiceImpl implements RemotingService, ServerConnectionLif
          logger.trace("Connection removed " + connectionID + " from server " + this.server, new Exception("trace"));
       }
 
+      issueFailure(connectionID, new ActiveMQRemoteDisconnectException());
+   }
+
+   private void issueFailure(Object connectionID, ActiveMQException e) {
       ConnectionEntry conn = connections.get(connectionID);
 
       if (conn != null && !conn.connection.isSupportReconnect()) {
          RemotingConnection removedConnection = removeConnection(connectionID);
          if (removedConnection != null) {
             try {
-               server.callBrokerPlugins(server.hasBrokerPlugins() ? plugin -> plugin.afterDestroyConnection(removedConnection) : null);
+               if (server.hasBrokerConnectionPlugins()) {
+                  server.callBrokerConnectionPlugins(plugin -> plugin.afterDestroyConnection(removedConnection));
+               }
             } catch (ActiveMQException t) {
                logger.warn("Error executing afterDestroyConnection plugin method: {}", t.getMessage(), t);
                conn.connection.fail(t);
                return;
             }
          }
-         conn.connection.fail(new ActiveMQRemoteDisconnectException());
+         conn.connection.fail(e);
       }
    }
 
    @Override
    public void connectionException(final Object connectionID, final ActiveMQException me) {
-      // We DO NOT call fail on connection exception, otherwise in event of real connection failure, the
-      // connection will be failed, the session will be closed and won't be able to reconnect
-
-      // E.g. if live server fails, then this handler wil be called on backup server for the server
-      // side replicating connection.
-      // If the connection fail() is called then the sessions on the backup will get closed.
-
-      // Connections should only fail when TTL is exceeded
+      issueFailure(connectionID, me);
    }
 
    @Override
@@ -712,9 +713,9 @@ public class RemotingServiceImpl implements RemotingService, ServerConnectionLif
                               // this is using a different thread
                               // as if anything wrong happens on flush
                               // failure detection could be affected
-                              conn.flush();
+                              conn.scheduledFlush();
                            } catch (Throwable e) {
-                              ActiveMQServerLogger.LOGGER.warn(e.getMessage(), e);
+                              ActiveMQServerLogger.LOGGER.failedToFlushOutstandingDataFromTheConnection(e);
                            }
 
                         }

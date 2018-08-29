@@ -23,6 +23,16 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerAddressPlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerBasePlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerBindingPlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerBridgePlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerConnectionPlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerConsumerPlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerCriticalPlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerMessagePlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerQueuePlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerSessionPlugin;
 import org.apache.activemq.artemis.utils.critical.CriticalAnalyzerPolicy;
 import org.apache.activemq.artemis.api.core.BroadcastGroupConfiguration;
 import org.apache.activemq.artemis.api.core.DiscoveryGroupConfiguration;
@@ -33,7 +43,6 @@ import org.apache.activemq.artemis.core.security.Role;
 import org.apache.activemq.artemis.core.server.JournalType;
 import org.apache.activemq.artemis.core.server.SecuritySettingPlugin;
 import org.apache.activemq.artemis.core.server.group.impl.GroupingHandlerConfiguration;
-import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerPlugin;
 import org.apache.activemq.artemis.core.settings.impl.AddressSettings;
 import org.apache.activemq.artemis.core.settings.impl.ResourceLimitSettings;
 
@@ -211,7 +220,7 @@ public interface Configuration {
 
    /**
     * Returns whether graceful shutdown is enabled for this server. <br>
-    * Default value is {@link org.apache.activemq.artemis.api.config.ActiveMQDefaultConfiguration#DEFAULT_SECURITY_ENABLED}.
+    * Default value is {@link org.apache.activemq.artemis.api.config.ActiveMQDefaultConfiguration#DEFAULT_GRACEFUL_SHUTDOWN_ENABLED}.
     */
    boolean isGracefulShutdownEnabled();
 
@@ -1000,12 +1009,12 @@ public interface Configuration {
    /**
     * Sets if passwords should be masked or not. True means the passwords should be masked.
     */
-   Configuration setMaskPassword(boolean maskPassword);
+   Configuration setMaskPassword(Boolean maskPassword);
 
    /**
     * If passwords are masked. True means the passwords are masked.
     */
-   boolean isMaskPassword();
+   Boolean isMaskPassword();
 
    /*
    * Whether or not that ActiveMQ Artemis should use all protocols available on the classpath. If false only the core protocol will
@@ -1043,6 +1052,11 @@ public interface Configuration {
     * Set the Artemis instance relative folder for data and stuff.
     */
    File getBrokerInstance();
+
+   default boolean isJDBC() {
+      StoreConfiguration configuration = getStoreConfiguration();
+      return (configuration != null && configuration.getStoreType() == StoreConfiguration.StoreType.DATABASE);
+   }
 
    StoreConfiguration getStoreConfiguration();
 
@@ -1124,20 +1138,65 @@ public interface Configuration {
    /**
     * @param plugins
     */
-   void registerBrokerPlugins(List<ActiveMQServerPlugin> plugins);
+   void registerBrokerPlugins(List<ActiveMQServerBasePlugin> plugins);
 
    /**
     * @param plugin
     */
-   void registerBrokerPlugin(ActiveMQServerPlugin plugin);
+   void registerBrokerPlugin(ActiveMQServerBasePlugin plugin);
 
    /**
     * @param plugin
     */
-   void unRegisterBrokerPlugin(ActiveMQServerPlugin plugin);
+   void unRegisterBrokerPlugin(ActiveMQServerBasePlugin plugin);
 
    /**
     * @return
     */
-   List<ActiveMQServerPlugin> getBrokerPlugins();
+   List<ActiveMQServerBasePlugin> getBrokerPlugins();
+
+   /**
+    * @return
+    */
+   List<ActiveMQServerConnectionPlugin> getBrokerConnectionPlugins();
+
+   /**
+    * @return
+    */
+   List<ActiveMQServerSessionPlugin> getBrokerSessionPlugins();
+
+   /**
+    * @return
+    */
+   List<ActiveMQServerConsumerPlugin> getBrokerConsumerPlugins();
+
+   /**
+    * @return
+    */
+   List<ActiveMQServerAddressPlugin> getBrokerAddressPlugins();
+
+   /**
+    * @return
+    */
+   List<ActiveMQServerQueuePlugin> getBrokerQueuePlugins();
+
+   /**
+    * @return
+    */
+   List<ActiveMQServerBindingPlugin> getBrokerBindingPlugins();
+
+   /**
+    * @return
+    */
+   List<ActiveMQServerMessagePlugin> getBrokerMessagePlugins();
+
+   /**
+    * @return
+    */
+   List<ActiveMQServerBridgePlugin> getBrokerBridgePlugins();
+
+   /**
+    * @return
+    */
+   List<ActiveMQServerCriticalPlugin> getBrokerCriticalPlugins();
 }

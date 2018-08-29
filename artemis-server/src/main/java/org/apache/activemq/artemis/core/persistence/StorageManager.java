@@ -28,6 +28,7 @@ import org.apache.activemq.artemis.api.core.Pair;
 import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.core.io.IOCallback;
 import org.apache.activemq.artemis.core.io.SequentialFile;
+import org.apache.activemq.artemis.core.io.SequentialFileFactory;
 import org.apache.activemq.artemis.core.journal.Journal;
 import org.apache.activemq.artemis.core.journal.JournalLoadInformation;
 import org.apache.activemq.artemis.core.paging.PageTransactionInfo;
@@ -64,6 +65,15 @@ import org.apache.activemq.artemis.utils.IDGenerator;
  * So the best was to add the interface and adjust the callers for the method
  */
 public interface StorageManager extends IDGenerator, ActiveMQComponent {
+
+   default long getMaxRecordSize() {
+      /** Null journal is pretty much memory */
+      return Long.MAX_VALUE;
+   }
+
+   default SequentialFileFactory getJournalSequentialFileFactory() {
+      return null;
+   }
 
    void criticalError(Throwable error);
 
@@ -326,9 +336,9 @@ public interface StorageManager extends IDGenerator, ActiveMQComponent {
    /**
     * @return The ID with the stored counter
     */
-   long storePageCounter(long txID, long queueID, long value) throws Exception;
+   long storePageCounter(long txID, long queueID, long value, long persistentSize) throws Exception;
 
-   long storePendingCounter(long queueID, long pageID, int inc) throws Exception;
+   long storePendingCounter(long queueID, long pageID) throws Exception;
 
    void deleteIncrementRecord(long txID, long recordID) throws Exception;
 
@@ -340,13 +350,13 @@ public interface StorageManager extends IDGenerator, ActiveMQComponent {
     * @return the ID with the increment record
     * @throws Exception
     */
-   long storePageCounterInc(long txID, long queueID, int add) throws Exception;
+   long storePageCounterInc(long txID, long queueID, int add, long persistentSize) throws Exception;
 
    /**
     * @return the ID with the increment record
     * @throws Exception
     */
-   long storePageCounterInc(long queueID, int add) throws Exception;
+   long storePageCounterInc(long queueID, int add, long size) throws Exception;
 
    /**
     * @return the bindings journal

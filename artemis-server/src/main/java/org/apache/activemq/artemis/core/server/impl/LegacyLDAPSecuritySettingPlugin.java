@@ -366,8 +366,18 @@ public class LegacyLDAPSecuritySettingPlugin implements SecuritySettingPlugin {
          Rdn rdn = ldapname.getRdn(ldapname.size() - 1);
          String roleName = rdn.getValue().toString();
          logger.debug("\tRole name: " + roleName);
-         Role role = new Role(roleName, permissionType.equalsIgnoreCase(writePermissionValue), permissionType.equalsIgnoreCase(readPermissionValue), permissionType.equalsIgnoreCase(adminPermissionValue), permissionType.equalsIgnoreCase(adminPermissionValue), permissionType.equalsIgnoreCase(adminPermissionValue), permissionType.equalsIgnoreCase(adminPermissionValue), false, // there is no permission from ActiveMQ 5.x that corresponds to the "manage" permission in ActiveMQ Artemis
-                              permissionType.equalsIgnoreCase(readPermissionValue)); // the "browse" permission matches "read" from ActiveMQ 5.x
+         Role role = new Role(roleName,
+                              permissionType.equalsIgnoreCase(writePermissionValue), // send
+                              permissionType.equalsIgnoreCase(readPermissionValue),  // consume
+                              permissionType.equalsIgnoreCase(adminPermissionValue), // createDurableQueue
+                              permissionType.equalsIgnoreCase(adminPermissionValue), // deleteDurableQueue
+                              permissionType.equalsIgnoreCase(adminPermissionValue), // createNonDurableQueue
+                              permissionType.equalsIgnoreCase(adminPermissionValue), // deleteNonDurableQueue
+                              false, // manage - there is no permission from ActiveMQ 5.x that corresponds to this
+                              permissionType.equalsIgnoreCase(readPermissionValue),  // browse
+                              permissionType.equalsIgnoreCase(adminPermissionValue), // createAddress
+                              permissionType.equalsIgnoreCase(adminPermissionValue)  // deleteAddress
+                              );
          roles.add(role);
       }
 
@@ -412,7 +422,7 @@ public class LegacyLDAPSecuritySettingPlugin implements SecuritySettingPlugin {
             }
          }
       } catch (NamingException e) {
-         logger.warn("Failed to process an event", e.getMessage(), e);
+         ActiveMQServerLogger.LOGGER.failedToProcessEvent(e);
       }
    }
 
@@ -464,7 +474,7 @@ public class LegacyLDAPSecuritySettingPlugin implements SecuritySettingPlugin {
             }
          }
       } catch (NamingException e) {
-         logger.warn("Failed to process an event", e.getMessage(), e);
+         ActiveMQServerLogger.LOGGER.failedToProcessEvent(e);
       }
    }
 
@@ -492,7 +502,7 @@ public class LegacyLDAPSecuritySettingPlugin implements SecuritySettingPlugin {
     */
    public void namingExceptionThrown(NamingExceptionEvent namingExceptionEvent) {
       context = null;
-      ActiveMQServerLogger.LOGGER.error("Caught unexpected exception.", namingExceptionEvent.getException());
+      ActiveMQServerLogger.LOGGER.caughtUnexpectedException(namingExceptionEvent.getException());
    }
 
    protected class LDAPNamespaceChangeListener implements NamespaceChangeListener, ObjectChangeListener {

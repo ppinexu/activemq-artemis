@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 
+import org.apache.activemq.artemis.api.core.ActiveMQException;
 import org.apache.activemq.artemis.api.core.Message;
 import org.apache.activemq.artemis.api.core.RoutingType;
 import org.apache.activemq.artemis.api.core.SimpleString;
@@ -32,6 +33,7 @@ import org.apache.activemq.artemis.core.server.ActiveMQServerLogger;
 import org.apache.activemq.artemis.core.server.MessageReference;
 import org.apache.activemq.artemis.core.server.Queue;
 import org.apache.activemq.artemis.core.server.QueueFactory;
+import org.apache.activemq.artemis.core.server.ServerConsumer;
 import org.apache.activemq.artemis.core.settings.HierarchicalRepository;
 import org.apache.activemq.artemis.core.settings.impl.AddressSettings;
 import org.apache.activemq.artemis.core.transaction.Transaction;
@@ -60,6 +62,9 @@ public class LastValueQueue extends QueueImpl {
                          final boolean autoCreated,
                          final RoutingType routingType,
                          final Integer maxConsumers,
+                         final Boolean exclusive,
+                         final Integer consumersBeforeDispatch,
+                         final Long delayBeforeDispatch,
                          final Boolean purgeOnNoConsumers,
                          final ScheduledExecutorService scheduledExecutor,
                          final PostOffice postOffice,
@@ -68,7 +73,7 @@ public class LastValueQueue extends QueueImpl {
                          final ArtemisExecutor executor,
                          final ActiveMQServer server,
                          final QueueFactory factory) {
-      super(persistenceID, address, name, filter, pageSubscription, user, durable, temporary, autoCreated, routingType, maxConsumers, purgeOnNoConsumers, scheduledExecutor, postOffice, storageManager, addressSettingsRepository, executor, server, factory);
+      super(persistenceID, address, name, filter, pageSubscription, user, durable, temporary, autoCreated, routingType, maxConsumers, exclusive, consumersBeforeDispatch, delayBeforeDispatch, purgeOnNoConsumers, scheduledExecutor, postOffice, storageManager, addressSettingsRepository, executor, server, factory);
    }
 
    @Override
@@ -115,7 +120,7 @@ public class LastValueQueue extends QueueImpl {
             } else {
                // We keep the current ref and ack the one we are returning
 
-               super.referenceHandled();
+               super.referenceHandled(ref);
 
                try {
                   super.acknowledge(ref);
@@ -138,7 +143,7 @@ public class LastValueQueue extends QueueImpl {
    private void replaceLVQMessage(MessageReference ref, HolderReference hr) {
       MessageReference oldRef = hr.getReference();
 
-      referenceHandled();
+      referenceHandled(ref);
 
       try {
          oldRef.acknowledge();
@@ -162,13 +167,20 @@ public class LastValueQueue extends QueueImpl {
       super.refRemoved(ref);
    }
 
+   @Override
+   public boolean isLastValue() {
+      return true;
+   }
+
    private class HolderReference implements MessageReference {
 
       private final SimpleString prop;
 
       private volatile MessageReference ref;
 
-      private Long consumerId;
+      private long consumerID;
+
+      private boolean hasConsumerID = false;
 
       HolderReference(final SimpleString prop, final MessageReference ref) {
          this.prop = prop;
@@ -232,6 +244,11 @@ public class LastValueQueue extends QueueImpl {
       }
 
       @Override
+      public long getMessageID() {
+         return getMessage().getMessageID();
+      }
+
+      @Override
       public Queue getQueue() {
          return ref.getQueue();
       }
@@ -262,8 +279,13 @@ public class LastValueQueue extends QueueImpl {
       }
 
       @Override
-      public void acknowledge(Transaction tx, AckReason reason) throws Exception {
-         ref.acknowledge(tx, reason);
+      public void acknowledge(Transaction tx, ServerConsumer consumer) throws Exception {
+         ref.acknowledge(tx, consumer);
+      }
+
+      @Override
+      public void acknowledge(Transaction tx, AckReason reason, ServerConsumer consumer) throws Exception {
+         ref.acknowledge(tx, reason, consumer);
       }
 
       @Override
@@ -297,20 +319,33 @@ public class LastValueQueue extends QueueImpl {
          return ref.getMessage().getMemoryEstimate();
       }
 
-      /* (non-Javadoc)
-       * @see org.apache.activemq.artemis.core.server.MessageReference#setConsumerId(java.lang.Long)
-       */
       @Override
-      public void setConsumerId(Long consumerID) {
-         this.consumerId = consumerID;
+      public void emptyConsumerID() {
+         this.hasConsumerID = false;
       }
 
-      /* (non-Javadoc)
-       * @see org.apache.activemq.artemis.core.server.MessageReference#getConsumerId()
-       */
       @Override
-      public Long getConsumerId() {
-         return this.consumerId;
+      public void setConsumerId(long consumerID) {
+         this.hasConsumerID = true;
+         this.consumerID = consumerID;
+      }
+
+      @Override
+      public boolean hasConsumerId() {
+         return hasConsumerID;
+      }
+
+      @Override
+      public long getConsumerId() {
+         if (!this.hasConsumerID) {
+            throw new IllegalStateException("consumerID isn't specified: please check hasConsumerId first");
+         }
+         return this.consumerID;
+      }
+
+      @Override
+      public long getPersistentSize() throws ActiveMQException {
+         return ref.getPersistentSize();
       }
    }
 

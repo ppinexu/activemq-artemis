@@ -18,6 +18,7 @@ package org.apache.activemq.artemis.spi.core.remoting;
 
 import javax.transaction.xa.XAException;
 import javax.transaction.xa.Xid;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Set;
 import java.util.concurrent.Executor;
@@ -33,8 +34,9 @@ import org.apache.activemq.artemis.api.core.client.SendAcknowledgementHandler;
 import org.apache.activemq.artemis.core.client.impl.ClientConsumerInternal;
 import org.apache.activemq.artemis.core.client.impl.ClientLargeMessageInternal;
 import org.apache.activemq.artemis.core.client.impl.ClientMessageInternal;
-import org.apache.activemq.artemis.core.client.impl.ClientProducerCreditsImpl;
+import org.apache.activemq.artemis.core.client.impl.ClientProducerCredits;
 import org.apache.activemq.artemis.core.client.impl.ClientSessionInternal;
+import org.apache.activemq.artemis.core.protocol.core.impl.wireformat.SessionQueueQueryResponseMessage;
 import org.apache.activemq.artemis.spi.core.protocol.RemotingConnection;
 import org.apache.activemq.artemis.utils.IDGenerator;
 import org.apache.activemq.artemis.utils.SimpleIDGenerator;
@@ -170,8 +172,20 @@ public abstract class SessionContext {
     * @param routingType
     * @param filterString
     * @param durable
+    * @param exclusive
+    * @param lastValue
     * @throws ActiveMQException
     */
+   public abstract void createSharedQueue(SimpleString address,
+                                          SimpleString queueName,
+                                          RoutingType routingType,
+                                          SimpleString filterString,
+                                          boolean durable,
+                                          Integer maxConsumers,
+                                          Boolean purgeOnNoConsumers,
+                                          Boolean exclusive,
+                                          Boolean lastValue) throws ActiveMQException;
+
    public abstract void createSharedQueue(SimpleString address,
                                           SimpleString queueName,
                                           RoutingType routingType,
@@ -185,8 +199,10 @@ public abstract class SessionContext {
 
    public abstract void deleteQueue(SimpleString queueName) throws ActiveMQException;
 
+   @Deprecated
    public abstract void createAddress(SimpleString address, Set<RoutingType> routingTypes, boolean autoCreated) throws ActiveMQException;
 
+   public abstract void createAddress(SimpleString address, EnumSet<RoutingType> routingTypes, boolean autoCreated) throws ActiveMQException;
 
    @Deprecated
    public abstract void createQueue(SimpleString address,
@@ -194,6 +210,17 @@ public abstract class SessionContext {
                                     SimpleString filterString,
                                     boolean durable,
                                     boolean temp,
+                                    boolean autoCreated) throws ActiveMQException;
+
+   @Deprecated
+   public abstract void createQueue(SimpleString address,
+                                    RoutingType routingType,
+                                    SimpleString queueName,
+                                    SimpleString filterString,
+                                    boolean durable,
+                                    boolean temp,
+                                    int maxConsumers,
+                                    boolean purgeOnNoConsumers,
                                     boolean autoCreated) throws ActiveMQException;
 
    public abstract void createQueue(SimpleString address,
@@ -204,7 +231,9 @@ public abstract class SessionContext {
                                     boolean temp,
                                     int maxConsumers,
                                     boolean purgeOnNoConsumers,
-                                    boolean autoCreated) throws ActiveMQException;
+                                    boolean autoCreated,
+                                    Boolean exclusive,
+                                    Boolean lastVale) throws ActiveMQException;
 
    public abstract ClientSession.QueueQuery queueQuery(SimpleString queueName) throws ActiveMQException;
 
@@ -297,6 +326,8 @@ public abstract class SessionContext {
 
    public abstract void resetMetadata(HashMap<String, String> metaDataToSend);
 
+   public abstract int getDefaultConsumerWindowSize(SessionQueueQueryResponseMessage response) throws ActiveMQException;
+
    // Failover utility classes
 
    /**
@@ -314,7 +345,7 @@ public abstract class SessionContext {
 
    public abstract void cleanup();
 
-   public abstract void linkFlowControl(SimpleString address, ClientProducerCreditsImpl clientProducerCredits);
+   public abstract void linkFlowControl(SimpleString address, ClientProducerCredits clientProducerCredits);
 
    public abstract boolean isWritable(ReadyListener callback);
 }

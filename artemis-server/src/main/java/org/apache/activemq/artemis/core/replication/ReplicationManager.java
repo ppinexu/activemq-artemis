@@ -27,7 +27,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.PooledByteBufAllocator;
@@ -116,11 +115,9 @@ public final class ReplicationManager implements ActiveMQComponent {
 
    private volatile boolean enabled;
 
-   private final AtomicBoolean writable = new AtomicBoolean(true);
-
    private final Queue<OperationContext> pendingTokens = new ConcurrentLinkedQueue<>();
 
-   private final ExecutorFactory executorFactory;
+   private final ExecutorFactory ioExecutorFactory;
 
    private final Executor replicationStream;
 
@@ -142,12 +139,12 @@ public final class ReplicationManager implements ActiveMQComponent {
    public ReplicationManager(CoreRemotingConnection remotingConnection,
                              final long timeout,
                              final long initialReplicationSyncTimeout,
-                             final ExecutorFactory executorFactory) {
-      this.executorFactory = executorFactory;
+                             final ExecutorFactory ioExecutorFactory) {
+      this.ioExecutorFactory = ioExecutorFactory;
       this.initialReplicationSyncTimeout = initialReplicationSyncTimeout;
       this.replicatingChannel = remotingConnection.getChannel(CHANNEL_ID.REPLICATION.id, -1);
       this.remotingConnection = remotingConnection;
-      this.replicationStream = executorFactory.getExecutor();
+      this.replicationStream = ioExecutorFactory.getExecutor();
       this.timeout = timeout;
    }
 
@@ -282,11 +279,21 @@ public final class ReplicationManager implements ActiveMQComponent {
 
    @Override
    public void stop() throws Exception {
+      stop(true);
+   }
+
+   public void stop(boolean clearTokens) throws Exception {
       synchronized (this) {
          if (!started) {
             logger.trace("Stopping being ignored as it hasn't been started");
             return;
          }
+
+         started = false;
+      }
+
+      if (logger.isTraceEnabled()) {
+         logger.trace("stop(clearTokens=" + clearTokens + ")", new Exception("Trace"));
       }
 
       // This is to avoid the write holding a lock while we are trying to close it
@@ -296,15 +303,17 @@ public final class ReplicationManager implements ActiveMQComponent {
       }
 
       enabled = false;
-      writable.set(true);
-      clearReplicationTokens();
+
+      if (clearTokens) {
+         clearReplicationTokens();
+      }
 
       RemotingConnection toStop = remotingConnection;
       if (toStop != null) {
          toStop.removeFailureListener(failureListener);
+         toStop.destroy();
       }
       remotingConnection = null;
-      started = false;
    }
 
    /**
@@ -355,7 +364,7 @@ public final class ReplicationManager implements ActiveMQComponent {
          return null;
       }
 
-      final OperationContext repliToken = OperationContextImpl.getContext(executorFactory);
+      final OperationContext repliToken = OperationContextImpl.getContext(ioExecutorFactory);
       if (lineUp) {
          repliToken.replicationLineUp();
       }
@@ -402,7 +411,7 @@ public final class ReplicationManager implements ActiveMQComponent {
       OperationContext ctx = pendingTokens.poll();
 
       if (ctx == null) {
-         logger.warn("Missing replication token on queue");
+         ActiveMQServerLogger.LOGGER.missingReplicationTokenOnQueue();
          return;
       }
       ctx.replicationDone();

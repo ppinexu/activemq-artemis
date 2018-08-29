@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.apache.activemq.artemis.api.config.ActiveMQDefaultConfiguration;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerBasePlugin;
 import org.apache.activemq.artemis.utils.critical.CriticalAnalyzerPolicy;
 import org.apache.activemq.artemis.api.core.BroadcastGroupConfiguration;
 import org.apache.activemq.artemis.api.core.DiscoveryGroupConfiguration;
@@ -59,7 +60,9 @@ import org.junit.Test;
 
 public class FileConfigurationTest extends ConfigurationImplTest {
 
-   private final String fullConfigurationName = "ConfigurationTest-full-config.xml";
+   protected String getConfigurationName() {
+      return "ConfigurationTest-full-config.xml";
+   }
 
    @Override
    @Test
@@ -193,7 +196,7 @@ public class FileConfigurationTest extends ConfigurationImplTest {
       Assert.assertEquals(12999, ((UDPBroadcastEndpointFactory) dc.getBroadcastEndpointFactory()).getGroupPort());
       Assert.assertEquals(23456, dc.getRefreshTimeout());
 
-      Assert.assertEquals(2, conf.getDivertConfigurations().size());
+      Assert.assertEquals(3, conf.getDivertConfigurations().size());
       for (DivertConfiguration dic : conf.getDivertConfigurations()) {
          if (dic.getName().equals("divert1")) {
             Assert.assertEquals("divert1", dic.getName());
@@ -201,20 +204,25 @@ public class FileConfigurationTest extends ConfigurationImplTest {
             Assert.assertEquals("address1", dic.getAddress());
             Assert.assertEquals("forwarding-address1", dic.getForwardingAddress());
             Assert.assertEquals("speed > 88", dic.getFilterString());
-            Assert.assertEquals("org.foo.Transformer", dic.getTransformerClassName());
+            Assert.assertEquals("org.foo.Transformer", dic.getTransformerConfiguration().getClassName());
             Assert.assertEquals(true, dic.isExclusive());
-         } else {
+         } else if (dic.getName().equals("divert2")) {
             Assert.assertEquals("divert2", dic.getName());
             Assert.assertEquals("routing-name2", dic.getRoutingName());
             Assert.assertEquals("address2", dic.getAddress());
             Assert.assertEquals("forwarding-address2", dic.getForwardingAddress());
             Assert.assertEquals("speed < 88", dic.getFilterString());
-            Assert.assertEquals("org.foo.Transformer2", dic.getTransformerClassName());
+            Assert.assertEquals("org.foo.Transformer2", dic.getTransformerConfiguration().getClassName());
             Assert.assertEquals(false, dic.isExclusive());
+         } else {
+            Assert.assertEquals("divert3", dic.getName());
+            Assert.assertEquals("org.foo.DivertTransformer3", dic.getTransformerConfiguration().getClassName());
+            Assert.assertEquals("divertTransformerValue1", dic.getTransformerConfiguration().getProperties().get("divertTransformerKey1"));
+            Assert.assertEquals("divertTransformerValue2", dic.getTransformerConfiguration().getProperties().get("divertTransformerKey2"));
          }
       }
 
-      Assert.assertEquals(2, conf.getBridgeConfigurations().size());
+      Assert.assertEquals(3, conf.getBridgeConfigurations().size());
       for (BridgeConfiguration bc : conf.getBridgeConfigurations()) {
          if (bc.getName().equals("bridge1")) {
             Assert.assertEquals("bridge1", bc.getName());
@@ -224,7 +232,7 @@ public class FileConfigurationTest extends ConfigurationImplTest {
             assertEquals("connection time-to-live", 370, bc.getConnectionTTL());
             Assert.assertEquals("bridge-forwarding-address1", bc.getForwardingAddress());
             Assert.assertEquals("sku > 1", bc.getFilterString());
-            Assert.assertEquals("org.foo.BridgeTransformer", bc.getTransformerClassName());
+            Assert.assertEquals("org.foo.BridgeTransformer", bc.getTransformerConfiguration().getClassName());
             Assert.assertEquals(3, bc.getRetryInterval());
             Assert.assertEquals(0.2, bc.getRetryIntervalMultiplier(), 0.0001);
             assertEquals("max retry interval", 10002, bc.getMaxRetryInterval());
@@ -234,15 +242,21 @@ public class FileConfigurationTest extends ConfigurationImplTest {
             Assert.assertEquals(null, bc.getDiscoveryGroupName());
             Assert.assertEquals(444, bc.getProducerWindowSize());
             Assert.assertEquals(1073741824, bc.getConfirmationWindowSize());
-         } else {
+         } else if (bc.getName().equals("bridge2")) {
             Assert.assertEquals("bridge2", bc.getName());
             Assert.assertEquals("queue2", bc.getQueueName());
             Assert.assertEquals("bridge-forwarding-address2", bc.getForwardingAddress());
             Assert.assertEquals(null, bc.getFilterString());
-            Assert.assertEquals(null, bc.getTransformerClassName());
+            Assert.assertEquals(null, bc.getTransformerConfiguration());
             Assert.assertEquals(null, bc.getStaticConnectors());
             Assert.assertEquals("dg1", bc.getDiscoveryGroupName());
             Assert.assertEquals(568320, bc.getProducerWindowSize());
+         } else {
+            Assert.assertEquals("bridge3", bc.getName());
+            Assert.assertEquals("org.foo.BridgeTransformer3", bc.getTransformerConfiguration().getClassName());
+            Assert.assertEquals("bridgeTransformerValue1", bc.getTransformerConfiguration().getProperties().get("bridgeTransformerKey1"));
+            Assert.assertEquals("bridgeTransformerValue2", bc.getTransformerConfiguration().getProperties().get("bridgeTransformerKey2"));
+
          }
       }
 
@@ -333,6 +347,7 @@ public class FileConfigurationTest extends ConfigurationImplTest {
       assertEquals(15, conf.getAddressesSettings().get("a2").getDefaultMaxConsumers());
       assertEquals(RoutingType.MULTICAST, conf.getAddressesSettings().get("a2").getDefaultQueueRoutingType());
       assertEquals(RoutingType.ANYCAST, conf.getAddressesSettings().get("a2").getDefaultAddressRoutingType());
+      assertEquals(10000, conf.getAddressesSettings().get("a2").getDefaultConsumerWindowSize());
 
       assertTrue(conf.getResourceLimitSettings().containsKey("myUser"));
       assertEquals(104, conf.getResourceLimitSettings().get("myUser").getMaxConnections());
@@ -410,7 +425,8 @@ public class FileConfigurationTest extends ConfigurationImplTest {
       assertEquals("color='blue'", queueConfiguration.getFilterString());
       assertEquals(ActiveMQDefaultConfiguration.getDefaultPurgeOnNoConsumers(), queueConfiguration.getPurgeOnNoConsumers());
       assertEquals("addr1", queueConfiguration.getAddress());
-      assertEquals(ActiveMQDefaultConfiguration.getDefaultMaxQueueConsumers(), queueConfiguration.getMaxConsumers());
+      // If null, then default will be taken from address-settings (which defaults to ActiveMQDefaultConfiguration.getDefaultMaxQueueConsumers())
+      assertEquals(null, queueConfiguration.getMaxConsumers());
 
       // Addr 1 Queue 2
       queueConfiguration = addressConfiguration.getQueueConfigurations().get(1);
@@ -418,7 +434,7 @@ public class FileConfigurationTest extends ConfigurationImplTest {
       assertEquals("q2", queueConfiguration.getName());
       assertTrue(queueConfiguration.isDurable());
       assertEquals("color='green'", queueConfiguration.getFilterString());
-      assertEquals(Queue.MAX_CONSUMERS_UNLIMITED, queueConfiguration.getMaxConsumers());
+      assertEquals(Queue.MAX_CONSUMERS_UNLIMITED, queueConfiguration.getMaxConsumers().intValue());
       assertFalse(queueConfiguration.getPurgeOnNoConsumers());
       assertEquals("addr1", queueConfiguration.getAddress());
 
@@ -436,7 +452,7 @@ public class FileConfigurationTest extends ConfigurationImplTest {
       assertEquals("q3", queueConfiguration.getName());
       assertTrue(queueConfiguration.isDurable());
       assertEquals("color='red'", queueConfiguration.getFilterString());
-      assertEquals(10, queueConfiguration.getMaxConsumers());
+      assertEquals(10, queueConfiguration.getMaxConsumers().intValue());
       assertEquals(ActiveMQDefaultConfiguration.getDefaultPurgeOnNoConsumers(), queueConfiguration.getPurgeOnNoConsumers());
       assertEquals("addr2", queueConfiguration.getAddress());
 
@@ -446,7 +462,8 @@ public class FileConfigurationTest extends ConfigurationImplTest {
       assertEquals("q4", queueConfiguration.getName());
       assertTrue(queueConfiguration.isDurable());
       assertNull(queueConfiguration.getFilterString());
-      assertEquals(ActiveMQDefaultConfiguration.getDefaultMaxQueueConsumers(), queueConfiguration.getMaxConsumers());
+      // If null, then default will be taken from address-settings (which defaults to ActiveMQDefaultConfiguration.getDefaultMaxQueueConsumers())
+      assertEquals(null, queueConfiguration.getMaxConsumers());
       assertTrue(queueConfiguration.getPurgeOnNoConsumers());
       assertEquals("addr2", queueConfiguration.getAddress());
 
@@ -495,63 +512,62 @@ public class FileConfigurationTest extends ConfigurationImplTest {
       Map<String, Set<Role>> securityRoles = fc.getSecurityRoles();
       Set<Role> roles = securityRoles.get("#");
 
-      //N.B. - FileConfigurationParser uses the constructor without createAddress and deleteAddress
       //cn=mygroup,dc=local,dc=com = amq1
       Role testRole1 = new Role("cn=mygroup,dc=local,dc=com",false, false, false,
                                false, true, false, false,
-                               false);
+                               false, false, false);
 
       //myrole1 = amq1 + amq2
       Role testRole2 = new Role("myrole1",false, false, false,
                                 false, true, true, false,
-                                false);
+                                false, false, false);
 
       //myrole3 = amq3 + amq4
       Role testRole3 = new Role("myrole3",false, false, true,
                                 true, false, false, false,
-                                false);
+                                false, false, false);
 
       //myrole4 = amq5 + amq!@#$%^&*() + amq6
       Role testRole4 = new Role("myrole4",true, true, false,
                                 false, false, false, false,
-                                true);
+                                true, true, true);
 
       //myrole5 = amq4 = amq3 + amq4
       Role testRole5 = new Role("myrole5",false, false, true,
                                 true, false, false, false,
-                                false);
+                                false, false, false);
 
       Role testRole6 = new Role("amq1",false, false, false,
                                 false, true, false, false,
-                                false);
+                                false, false, false);
 
       Role testRole7 = new Role("amq2",false, false, false,
                                 false, false, true, false,
-                                false);
+                                false, false, false);
 
       Role testRole8 = new Role("amq3",false, false, true,
                                 false, false, false, false,
-                                false);
+                                false, false, false);
 
       Role testRole9 = new Role("amq4",false, false, true,
                                 true, false, false, false,
-                                false);
+                                false, false, false);
 
       Role testRole10 = new Role("amq5",false, false, false,
                                 false, false, false, false,
-                                false);
+                                false, true, true);
 
       Role testRole11 = new Role("amq6",false, true, false,
                                 false, false, false, false,
-                                true);
+                                true, false, false);
 
       Role testRole12 = new Role("amq7",false, false, false,
                                 false, false, false, true,
-                                false);
+                                false, false, false);
 
       Role testRole13 = new Role("amq!@#$%^&*()",true, false, false,
                                 false, false, false, false,
-                                false);
+                                false, false, false);
 
       assertEquals(13, roles.size());
       assertTrue(roles.contains(testRole1));
@@ -577,7 +593,7 @@ public class FileConfigurationTest extends ConfigurationImplTest {
       try {
 
          // copy working configuration to a location where the standard classloader cannot find it
-         final Path workingConfiguration = new File(getClass().getResource("/" + fullConfigurationName).toURI()).toPath();
+         final Path workingConfiguration = new File(getClass().getResource("/" + getConfigurationName()).toURI()).toPath();
          final Path targetFile = customConfiguration.toPath();
 
          Files.copy(workingConfiguration, targetFile, StandardCopyOption.REPLACE_EXISTING);
@@ -634,7 +650,7 @@ public class FileConfigurationTest extends ConfigurationImplTest {
       deploymentManager.addDeployable(fc);
       deploymentManager.readConfiguration();
 
-      List<ActiveMQServerPlugin> brokerPlugins = fc.getBrokerPlugins();
+      List<ActiveMQServerBasePlugin> brokerPlugins = fc.getBrokerPlugins();
       assertEquals(2, brokerPlugins.size());
       assertTrue(brokerPlugins.get(0) instanceof EmptyPlugin1);
       assertTrue(brokerPlugins.get(1) instanceof EmptyPlugin2);
@@ -652,7 +668,7 @@ public class FileConfigurationTest extends ConfigurationImplTest {
    @Override
    protected Configuration createConfiguration() throws Exception {
       FileConfiguration fc = new FileConfiguration();
-      FileDeploymentManager deploymentManager = new FileDeploymentManager(fullConfigurationName);
+      FileDeploymentManager deploymentManager = new FileDeploymentManager(getConfigurationName());
       deploymentManager.addDeployable(fc);
       deploymentManager.readConfiguration();
       return fc;

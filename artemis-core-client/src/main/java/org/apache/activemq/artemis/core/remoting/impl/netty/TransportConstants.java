@@ -95,19 +95,29 @@ public class TransportConstants {
 
    public static final String TRUSTSTORE_PASSWORD_PROP_NAME = "trustStorePassword";
 
+   public static final String CRL_PATH_PROP_NAME = "crlPath";
+
    public static final String ENABLED_CIPHER_SUITES_PROP_NAME = "enabledCipherSuites";
 
    public static final String ENABLED_PROTOCOLS_PROP_NAME = "enabledProtocols";
 
    public static final String NEED_CLIENT_AUTH_PROP_NAME = "needClientAuth";
 
+   public static final String WANT_CLIENT_AUTH_PROP_NAME = "wantClientAuth";
+
    public static final String VERIFY_HOST_PROP_NAME = "verifyHost";
+
+   public static final String TRUST_ALL_PROP_NAME = "trustAll";
+
+   public static final String FORCE_SSL_PARAMETERS = "forceSSLParameters";
 
    public static final String SNIHOST_PROP_NAME = "sniHost";
 
    public static final String BACKLOG_PROP_NAME = "backlog";
 
    public static final String USE_DEFAULT_SSL_CONTEXT_PROP_NAME = "useDefaultSslContext";
+
+   public static final String SSL_PROVIDER = "sslProvider";
 
    public static final String NETTY_VERSION;
 
@@ -118,7 +128,7 @@ public class TransportConstants {
     * @see <a
     * href="http://design.jboss.org/jbossorg/branding/Javadocs/doc/api/org/jboss/netty/channel/socket/SocketChannelConfig.html#setTcpNoDelay%28boolean%29">
     * Netty note on this option</a>
-    * @see <a href="http://docs.oracle.com/javase/6/docs/technotes/guides/net/socketOpt.html">Oracle
+    * @see <a href="http://docs.oracle.com/javase/8/docs/technotes/guides/net/socketOpt.html">Oracle
     * doc on tcpNoDelay</a>
     */
    public static final String TCP_NODELAY_PROPNAME = "tcpNoDelay";
@@ -187,13 +197,25 @@ public class TransportConstants {
 
    public static final String DEFAULT_TRUSTSTORE_PASSWORD = null;
 
+   public static final String DEFAULT_CRL_PATH = null;
+
    public static final String DEFAULT_ENABLED_CIPHER_SUITES = null;
 
    public static final String DEFAULT_ENABLED_PROTOCOLS = null;
 
    public static final boolean DEFAULT_NEED_CLIENT_AUTH = false;
 
+   public static final boolean DEFAULT_WANT_CLIENT_AUTH = false;
+
    public static final boolean DEFAULT_VERIFY_HOST = false;
+
+   public static final String DEFAULT_SSL_PROVIDER = "JDK";
+
+   public static final String OPENSSL_PROVIDER = "OPENSSL";
+
+   public static final boolean DEFAULT_TRUST_ALL = false;
+
+   public static final boolean DEFAULT_FORCE_SSL_PARAMETERS = false;
 
    public static final boolean DEFAULT_USE_DEFAULT_SSL_CONTEXT = false;
 
@@ -251,6 +273,14 @@ public class TransportConstants {
 
    public static final long DEFAULT_CONNECTIONS_ALLOWED = -1L;
 
+   public static final String STOMP_MAX_FRAME_PAYLOAD_LENGTH = "stompMaxFramePayloadLength";
+
+   public static final int DEFAULT_STOMP_MAX_FRAME_PAYLOAD_LENGTH = 65536;
+
+   public static final String HANDSHAKE_TIMEOUT = "handshake-timeout";
+
+   public static final int DEFAULT_HANDSHAKE_TIMEOUT = 10;
+
    static {
       Set<String> allowableAcceptorKeys = new HashSet<>();
       allowableAcceptorKeys.add(TransportConstants.SSL_ENABLED_PROP_NAME);
@@ -275,6 +305,7 @@ public class TransportConstants {
       allowableAcceptorKeys.add(TransportConstants.ENABLED_CIPHER_SUITES_PROP_NAME);
       allowableAcceptorKeys.add(TransportConstants.ENABLED_PROTOCOLS_PROP_NAME);
       allowableAcceptorKeys.add(TransportConstants.NEED_CLIENT_AUTH_PROP_NAME);
+      allowableAcceptorKeys.add(TransportConstants.WANT_CLIENT_AUTH_PROP_NAME);
       allowableAcceptorKeys.add(TransportConstants.VERIFY_HOST_PROP_NAME);
       allowableAcceptorKeys.add(TransportConstants.TCP_NODELAY_PROPNAME);
       allowableAcceptorKeys.add(TransportConstants.TCP_SENDBUFFER_SIZE_PROPNAME);
@@ -294,9 +325,13 @@ public class TransportConstants {
       allowableAcceptorKeys.add(TransportConstants.HEART_BEAT_TO_CONNECTION_TTL_MODIFIER);
       allowableAcceptorKeys.add(TransportConstants.STOMP_ENABLE_MESSAGE_ID);
       allowableAcceptorKeys.add(TransportConstants.CONNECTIONS_ALLOWED);
+      allowableAcceptorKeys.add(TransportConstants.STOMP_MAX_FRAME_PAYLOAD_LENGTH);
       allowableAcceptorKeys.add(ActiveMQDefaultConfiguration.getPropMaskPassword());
       allowableAcceptorKeys.add(ActiveMQDefaultConfiguration.getPropPasswordCodec());
       allowableAcceptorKeys.add(TransportConstants.BACKLOG_PROP_NAME);
+      allowableAcceptorKeys.add(TransportConstants.CRL_PATH_PROP_NAME);
+      allowableAcceptorKeys.add(TransportConstants.HANDSHAKE_TIMEOUT);
+      allowableAcceptorKeys.add(TransportConstants.SSL_PROVIDER);
 
       ALLOWABLE_ACCEPTOR_KEYS = Collections.unmodifiableSet(allowableAcceptorKeys);
 
@@ -329,6 +364,8 @@ public class TransportConstants {
       allowableConnectorKeys.add(TransportConstants.ENABLED_CIPHER_SUITES_PROP_NAME);
       allowableConnectorKeys.add(TransportConstants.ENABLED_PROTOCOLS_PROP_NAME);
       allowableConnectorKeys.add(TransportConstants.VERIFY_HOST_PROP_NAME);
+      allowableConnectorKeys.add(TransportConstants.TRUST_ALL_PROP_NAME);
+      allowableConnectorKeys.add(TransportConstants.FORCE_SSL_PARAMETERS);
       allowableConnectorKeys.add(TransportConstants.TCP_NODELAY_PROPNAME);
       allowableConnectorKeys.add(TransportConstants.TCP_SENDBUFFER_SIZE_PROPNAME);
       allowableConnectorKeys.add(TransportConstants.TCP_RECEIVEBUFFER_SIZE_PROPNAME);
@@ -341,6 +378,9 @@ public class TransportConstants {
       allowableConnectorKeys.add(ActiveMQDefaultConfiguration.getPropPasswordCodec());
       allowableConnectorKeys.add(TransportConstants.NETTY_CONNECT_TIMEOUT);
       allowableConnectorKeys.add(TransportConstants.USE_DEFAULT_SSL_CONTEXT_PROP_NAME);
+      allowableConnectorKeys.add(TransportConstants.SSL_PROVIDER);
+      allowableConnectorKeys.add(TransportConstants.HANDSHAKE_TIMEOUT);
+      allowableConnectorKeys.add(TransportConstants.CRL_PATH_PROP_NAME);
 
       ALLOWABLE_CONNECTOR_KEYS = Collections.unmodifiableSet(allowableConnectorKeys);
 

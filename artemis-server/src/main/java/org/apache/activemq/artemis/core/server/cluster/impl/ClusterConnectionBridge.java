@@ -31,11 +31,13 @@ import org.apache.activemq.artemis.api.core.TransportConfiguration;
 import org.apache.activemq.artemis.api.core.client.ClientConsumer;
 import org.apache.activemq.artemis.api.core.client.ClientMessage;
 import org.apache.activemq.artemis.api.core.client.ClientProducer;
+import org.apache.activemq.artemis.api.core.client.TopologyMember;
 import org.apache.activemq.artemis.api.core.management.CoreNotificationType;
 import org.apache.activemq.artemis.api.core.management.ManagementHelper;
 import org.apache.activemq.artemis.api.core.management.ResourceNames;
 import org.apache.activemq.artemis.core.client.impl.ClientSessionFactoryInternal;
 import org.apache.activemq.artemis.core.client.impl.ServerLocatorInternal;
+import org.apache.activemq.artemis.core.client.impl.TopologyMemberImpl;
 import org.apache.activemq.artemis.core.filter.Filter;
 import org.apache.activemq.artemis.core.postoffice.BindingType;
 import org.apache.activemq.artemis.core.server.ActiveMQServer;
@@ -45,7 +47,7 @@ import org.apache.activemq.artemis.core.server.cluster.ActiveMQServerSideProtoco
 import org.apache.activemq.artemis.core.server.cluster.ClusterConnection;
 import org.apache.activemq.artemis.core.server.cluster.ClusterManager;
 import org.apache.activemq.artemis.core.server.cluster.MessageFlowRecord;
-import org.apache.activemq.artemis.core.server.cluster.Transformer;
+import org.apache.activemq.artemis.core.server.transformer.Transformer;
 import org.apache.activemq.artemis.utils.CompositeAddress;
 import org.apache.activemq.artemis.utils.UUID;
 import org.apache.activemq.artemis.utils.UUIDGenerator;
@@ -57,7 +59,6 @@ import org.jboss.logging.Logger;
  * Such as such adding extra properties and setting up notifications between the nodes.
  */
 public class ClusterConnectionBridge extends BridgeImpl {
-
    private static final Logger logger = Logger.getLogger(ClusterConnectionBridge.class);
 
    private final ClusterConnection clusterConnection;
@@ -79,6 +80,7 @@ public class ClusterConnectionBridge extends BridgeImpl {
    private final ServerLocatorInternal discoveryLocator;
 
    private final String storeAndForwardPrefix;
+   private TopologyMemberImpl member;
 
    public ClusterConnectionBridge(final ClusterConnection clusterConnection,
                                   final ClusterManager clusterManager,
@@ -125,9 +127,6 @@ public class ClusterConnectionBridge extends BridgeImpl {
       this.managementNotificationAddress = managementNotificationAddress;
       this.flowRecord = flowRecord;
 
-      // we need to disable DLQ check on the clustered bridges
-      queue.setInternalQueue(true);
-
       if (logger.isTraceEnabled()) {
          logger.trace("Setting up bridge between " + clusterConnection.getConnector() + " and " + targetLocator, new Exception("trace"));
       }
@@ -139,6 +138,13 @@ public class ClusterConnectionBridge extends BridgeImpl {
    protected ClientSessionFactoryInternal createSessionFactory() throws Exception {
       serverLocator.setProtocolManagerFactory(ActiveMQServerSideProtocolManagerFactory.getInstance(serverLocator));
       ClientSessionFactoryInternal factory = (ClientSessionFactoryInternal) serverLocator.createSessionFactory(targetNodeID);
+      //if it is null then its possible the broker was removed after a disconnect so lets try the original connectors
+      if (factory == null) {
+         factory = reconnectOnOriginalNode();
+         if (factory == null) {
+            return null;
+         }
+      }
       setSessionFactory(factory);
 
       if (factory == null) {
@@ -150,7 +156,7 @@ public class ClusterConnectionBridge extends BridgeImpl {
    }
 
    @Override
-   protected Message beforeForward(final Message message) {
+   protected Message beforeForward(final Message message, final SimpleString forwardingAddress) {
       // We make a copy of the message, then we strip out the unwanted routing id headers and leave
       // only
       // the one pertinent for the address node - this is important since different queues on different
@@ -182,7 +188,7 @@ public class ClusterConnectionBridge extends BridgeImpl {
 
       messageCopy.putExtraBytesProperty(Message.HDR_ROUTE_TO_IDS, queueIds);
 
-      messageCopy = super.beforeForward(messageCopy);
+      messageCopy = super.beforeForward(messageCopy, forwardingAddress);
 
       return messageCopy;
    }
@@ -347,6 +353,20 @@ public class ClusterConnectionBridge extends BridgeImpl {
       return filterString;
    }
 
+
+   @Override
+   protected void nodeUP(TopologyMember member, boolean last) {
+      if (member != null && targetNodeID != null && !this.targetNodeID.equals(member.getNodeId())) {
+         //A ClusterConnectionBridge (identified by holding an internal queue)
+         //never re-connects to another node here. It only connects to its original
+         //target node (from the ClusterConnection) or its backups. That's why
+         //we put a return here.
+         return;
+      }
+      super.nodeUP(member, last);
+   }
+
+
    @Override
    protected void afterConnect() throws Exception {
       super.afterConnect();
@@ -371,10 +391,5 @@ public class ClusterConnectionBridge extends BridgeImpl {
       } else {
          clusterConnection.disconnectRecord(targetNodeID);
       }
-   }
-
-   @Override
-   protected boolean isPlainCoreBridge() {
-      return false;
    }
 }

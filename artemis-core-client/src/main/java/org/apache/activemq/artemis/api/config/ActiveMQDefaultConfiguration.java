@@ -19,9 +19,9 @@ package org.apache.activemq.artemis.api.config;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.activemq.artemis.ArtemisConstants;
+import org.apache.activemq.artemis.api.core.RoutingType;
 import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.core.server.DivertConfigurationRoutingType;
-import org.apache.activemq.artemis.api.core.RoutingType;
 import org.apache.activemq.artemis.utils.critical.CriticalAnalyzerPolicy;
 
 /**
@@ -103,7 +103,7 @@ public final class ActiveMQDefaultConfiguration {
 
    // These defaults are applied depending on whether the journal type
    // is NIO or AIO.
-   private static int DEFAULT_JOURNAL_MAX_IO_AIO = 500;
+   private static int DEFAULT_JOURNAL_MAX_IO_AIO = 4096;
    private static int DEFAULT_JOURNAL_POOL_FILES = -1;
    private static int DEFAULT_JOURNAL_BUFFER_TIMEOUT_AIO = ArtemisConstants.DEFAULT_JOURNAL_BUFFER_TIMEOUT_AIO;
    private static int DEFAULT_JOURNAL_BUFFER_SIZE_AIO = ArtemisConstants.DEFAULT_JOURNAL_BUFFER_SIZE_AIO;
@@ -179,7 +179,7 @@ public final class ActiveMQDefaultConfiguration {
    private static String DEFAULT_CLUSTER_PASSWORD = "CHANGE ME!!";
 
    // This option controls whether passwords in server configuration need be masked. If set to "true" the passwords are masked.
-   private static boolean DEFAULT_MASK_PASSWORD = false;
+   private static Boolean DEFAULT_MASK_PASSWORD = null;
 
    // true means that the management API is available via JMX
    private static boolean DEFAULT_JMX_MANAGEMENT_ENABLED = true;
@@ -423,8 +423,8 @@ public final class ActiveMQDefaultConfiguration {
    // Default database url.  Derby database is used by default.
    private static String DEFAULT_DATABASE_URL = null;
 
-   // Default JDBC Driver class name
-   private static String DEFAULT_JDBC_DRIVER_CLASS_NAME = null;
+   // Default JDBC Driver class name, derby by default just for demo purposes
+   private static String DEFAULT_JDBC_DRIVER_CLASS_NAME = "org.apache.derby.jdbc.EmbeddedDriver";
 
    // Default message table name, used with Database storage type
    private static String DEFAULT_MESSAGE_TABLE_NAME = "MESSAGES";
@@ -438,7 +438,18 @@ public final class ActiveMQDefaultConfiguration {
    // Default large messages table name, used with Database storage type
    private static final String DEFAULT_PAGE_STORE_TABLE_NAME = "PAGE_STORE";
 
+   // Default node manager store table name, used with Database storage type
+   private static final String DEFAULT_NODE_MANAGER_STORE_TABLE_NAME = "NODE_MANAGER_STORE";
+
    private static final int DEFAULT_JDBC_NETWORK_TIMEOUT = (int) TimeUnit.SECONDS.toMillis(20);
+
+   private static final long DEFAULT_JDBC_LOCK_RENEW_PERIOD_MILLIS = TimeUnit.SECONDS.toMillis(4);
+
+   private static final long DEFAULT_JDBC_LOCK_EXPIRATION_MILLIS = TimeUnit.SECONDS.toMillis(20);
+
+   private static final long DEFAULT_JDBC_JOURNAL_SYNC_PERIOD_MILLIS = 5;
+
+   private static final long DEFAULT_JDBC_LOCK_ACQUISITION_TIMEOUT_MILLIS = -1;
 
    // Default period to wait between connection TTL checks
    public static final long DEFAULT_CONNECTION_TTL_CHECK_INTERVAL = 2000;
@@ -456,7 +467,15 @@ public final class ActiveMQDefaultConfiguration {
 
    public static final int DEFAULT_MAX_QUEUE_CONSUMERS = -1;
 
+   public static final boolean DEFAULT_EXCLUSIVE = false;
+
+   public static final boolean DEFAULT_LAST_VALUE = false;
+
    public static final boolean DEFAULT_PURGE_ON_NO_CONSUMERS = false;
+
+   public static final int DEFAULT_CONSUMERS_BEFORE_DISPATCH = 0;
+
+   public static final long DEFAULT_DELAY_BEFORE_DISPATCH = -1;
 
    public static final RoutingType DEFAULT_ROUTING_TYPE = RoutingType.MULTICAST;
 
@@ -475,6 +494,15 @@ public final class ActiveMQDefaultConfiguration {
    public static final String DEFAULT_INTERNAL_NAMING_PREFIX = "$.artemis.internal.";
 
    public static boolean DEFAULT_VOTE_ON_REPLICATION_FAILURE = false;
+
+   //how many times we retry a vote before restarting as a backup
+   private static int DEFAULT_VOTE_RETRIES = 12;
+
+   //how long we wait between votes, 5 secs
+   private static long DEFAULT_VOTE_RETRY_WAIT = 5000;
+
+   //how long we wait for vote result, 30 secs
+   private static int DEFAULT_QUORUM_VOTE_WAIT = 30;
 
    public static int DEFAULT_QUORUM_SIZE = -1;
 
@@ -607,7 +635,7 @@ public final class ActiveMQDefaultConfiguration {
    /**
     * This option controls whether passwords in server configuration need be masked. If set to "true" the passwords are masked.
     */
-   public static boolean isDefaultMaskPassword() {
+   public static Boolean isDefaultMaskPassword() {
       return DEFAULT_MASK_PASSWORD;
    }
 
@@ -1211,8 +1239,28 @@ public final class ActiveMQDefaultConfiguration {
       return DEFAULT_PAGE_STORE_TABLE_NAME;
    }
 
+   public static String getDefaultNodeManagerStoreTableName() {
+      return DEFAULT_NODE_MANAGER_STORE_TABLE_NAME;
+   }
+
    public static int getDefaultJdbcNetworkTimeout() {
       return DEFAULT_JDBC_NETWORK_TIMEOUT;
+   }
+
+   public static long getDefaultJdbcLockRenewPeriodMillis() {
+      return DEFAULT_JDBC_LOCK_RENEW_PERIOD_MILLIS;
+   }
+
+   public static long getDefaultJdbcJournalSyncPeriodMillis() {
+      return DEFAULT_JDBC_JOURNAL_SYNC_PERIOD_MILLIS;
+   }
+
+   public static long getDefaultJdbcLockExpirationMillis() {
+      return DEFAULT_JDBC_LOCK_EXPIRATION_MILLIS;
+   }
+
+   public static long getDefaultJdbcLockAcquisitionTimeoutMillis() {
+      return DEFAULT_JDBC_LOCK_ACQUISITION_TIMEOUT_MILLIS;
    }
 
    public static long getDefaultConnectionTtlCheckInterval() {
@@ -1246,8 +1294,24 @@ public final class ActiveMQDefaultConfiguration {
       return DEFAULT_MAX_QUEUE_CONSUMERS;
    }
 
+   public static boolean getDefaultExclusive() {
+      return DEFAULT_EXCLUSIVE;
+   }
+
+   public static boolean getDefaultLastValue() {
+      return DEFAULT_EXCLUSIVE;
+   }
+
    public static boolean getDefaultPurgeOnNoConsumers() {
       return DEFAULT_PURGE_ON_NO_CONSUMERS;
+   }
+
+   public static int getDefaultConsumersBeforeDispatch() {
+      return DEFAULT_CONSUMERS_BEFORE_DISPATCH;
+   }
+
+   public static long getDefaultDelayBeforeDispatch() {
+      return DEFAULT_DELAY_BEFORE_DISPATCH;
    }
 
    public static String getInternalNamingPrefix() {
@@ -1309,4 +1373,15 @@ public final class ActiveMQDefaultConfiguration {
    }
 
 
+   public static int getDefaultVoteRetries() {
+      return DEFAULT_VOTE_RETRIES;
+   }
+
+   public static long getDefaultVoteRetryWait() {
+      return DEFAULT_VOTE_RETRY_WAIT;
+   }
+
+   public static int getDefaultQuorumVoteWait() {
+      return DEFAULT_QUORUM_VOTE_WAIT;
+   }
 }

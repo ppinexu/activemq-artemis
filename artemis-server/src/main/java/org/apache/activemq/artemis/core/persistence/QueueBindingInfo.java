@@ -54,6 +54,22 @@ public interface QueueBindingInfo {
 
    void setPurgeOnNoConsumers(boolean purgeOnNoConsumers);
 
+   boolean isExclusive();
+
+   void setExclusive(boolean exclusive);
+
+   boolean isLastValue();
+
+   void setLastValue(boolean lastValue);
+
+   int getConsumersBeforeDispatch();
+
+   void setConsumersBeforeDispatch(int consumersBeforeDispatch);
+
+   long getDelayBeforeDispatch();
+
+   void setDelayBeforeDispatch(long delayBeforeDispatch);
+
    byte getRoutingType();
 
    void setRoutingType(byte routingType);

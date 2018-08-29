@@ -29,6 +29,7 @@ import org.apache.activemq.artemis.protocol.amqp.broker.AMQPSessionCallback;
 import org.apache.activemq.artemis.protocol.amqp.exceptions.ActiveMQAMQPException;
 import org.apache.activemq.artemis.protocol.amqp.exceptions.ActiveMQAMQPInternalErrorException;
 import org.apache.activemq.artemis.protocol.amqp.exceptions.ActiveMQAMQPNotFoundException;
+import org.apache.activemq.artemis.protocol.amqp.exceptions.ActiveMQAMQPSecurityException;
 import org.apache.activemq.artemis.protocol.amqp.logger.ActiveMQAMQPProtocolMessageBundle;
 import org.apache.activemq.artemis.protocol.amqp.sasl.PlainSASLResult;
 import org.apache.activemq.artemis.protocol.amqp.sasl.SASLResult;
@@ -40,6 +41,7 @@ import org.apache.qpid.proton.amqp.transaction.TransactionalState;
 import org.apache.qpid.proton.amqp.transport.AmqpError;
 import org.apache.qpid.proton.amqp.transport.ErrorCondition;
 import org.apache.qpid.proton.amqp.transport.ReceiverSettleMode;
+import org.apache.qpid.proton.codec.ReadableBuffer;
 import org.apache.qpid.proton.engine.Delivery;
 import org.apache.qpid.proton.engine.Receiver;
 import org.jboss.logging.Logger;
@@ -54,7 +56,7 @@ public class ProtonServerReceiverContext extends ProtonInitializable implements 
 
    protected final Receiver receiver;
 
-   protected String address;
+   protected SimpleString address;
 
    protected final AMQPSessionCallback sessionSPI;
 
@@ -96,40 +98,47 @@ public class ProtonServerReceiverContext extends ProtonInitializable implements 
       // We don't currently support SECOND so enforce that the answer is anlways FIRST
       receiver.setReceiverSettleMode(ReceiverSettleMode.FIRST);
 
+      RoutingType defRoutingType;
+
       if (target != null) {
          if (target.getDynamic()) {
             // if dynamic we have to create the node (queue) and set the address on the target, the node is temporary and
             // will be deleted on closing of the session
-            address = sessionSPI.tempQueueName();
+            address = SimpleString.toSimpleString(sessionSPI.tempQueueName());
+            defRoutingType = getRoutingType(target.getCapabilities(), address);
 
             try {
-               sessionSPI.createTemporaryQueue(address, getRoutingType(target.getCapabilities()));
+               sessionSPI.createTemporaryQueue(address, defRoutingType);
+            } catch (ActiveMQAMQPSecurityException e) {
+               throw e;
             } catch (ActiveMQSecurityException e) {
                throw ActiveMQAMQPProtocolMessageBundle.BUNDLE.securityErrorCreatingTempDestination(e.getMessage());
             } catch (Exception e) {
                throw new ActiveMQAMQPInternalErrorException(e.getMessage(), e);
             }
             expiryPolicy = target.getExpiryPolicy() != null ? target.getExpiryPolicy() : TerminusExpiryPolicy.LINK_DETACH;
-            target.setAddress(address);
+            target.setAddress(address.toString());
          } else {
             // the target will have an address unless the remote is requesting an anonymous
             // relay in which case the address in the incoming message's to field will be
             // matched on receive of the message.
-            address = target.getAddress();
+            address = SimpleString.toSimpleString(target.getAddress());
 
             if (address != null && !address.isEmpty()) {
+               defRoutingType = getRoutingType(target.getCapabilities(), address);
                try {
-                  if (!sessionSPI.bindingQuery(address)) {
+                  if (!sessionSPI.bindingQuery(address, defRoutingType)) {
                      throw ActiveMQAMQPProtocolMessageBundle.BUNDLE.addressDoesntExist();
                   }
                } catch (ActiveMQAMQPNotFoundException e) {
                   throw e;
                } catch (Exception e) {
+                  log.debug(e.getMessage(), e);
                   throw new ActiveMQAMQPInternalErrorException(e.getMessage(), e);
                }
 
                try {
-                  sessionSPI.check(SimpleString.toSimpleString(address), CheckType.SEND, new SecurityAuth() {
+                  sessionSPI.check(address, CheckType.SEND, new SecurityAuth() {
                      @Override
                      public String getUsername() {
                         String username = null;
@@ -176,12 +185,19 @@ public class ProtonServerReceiverContext extends ProtonInitializable implements 
       flow(amqpCredits, minCreditRefresh);
    }
 
-   private RoutingType getRoutingType(Symbol[] symbols) {
-      for (Symbol symbol : symbols) {
-         if (AmqpSupport.TEMP_TOPIC_CAPABILITY.equals(symbol) || AmqpSupport.TOPIC_CAPABILITY.equals(symbol)) {
-            return RoutingType.MULTICAST;
-         } else if (AmqpSupport.TEMP_QUEUE_CAPABILITY.equals(symbol) || AmqpSupport.QUEUE_CAPABILITY.equals(symbol)) {
-            return RoutingType.ANYCAST;
+   public RoutingType getRoutingType(Receiver receiver, SimpleString address) {
+      org.apache.qpid.proton.amqp.messaging.Target target = (org.apache.qpid.proton.amqp.messaging.Target) receiver.getRemoteTarget();
+      return target != null ? getRoutingType(target.getCapabilities(), address) : getRoutingType((Symbol[]) null, address);
+   }
+
+   private RoutingType getRoutingType(Symbol[] symbols, SimpleString address) {
+      if (symbols != null) {
+         for (Symbol symbol : symbols) {
+            if (AmqpSupport.TEMP_TOPIC_CAPABILITY.equals(symbol) || AmqpSupport.TOPIC_CAPABILITY.equals(symbol)) {
+               return RoutingType.MULTICAST;
+            } else if (AmqpSupport.TEMP_QUEUE_CAPABILITY.equals(symbol) || AmqpSupport.QUEUE_CAPABILITY.equals(symbol)) {
+               return RoutingType.ANYCAST;
+            }
          }
       }
 
@@ -202,6 +218,23 @@ public class ProtonServerReceiverContext extends ProtonInitializable implements 
          if (!delivery.isReadable()) {
             return;
          }
+
+         if (delivery.isAborted()) {
+            receiver = ((Receiver) delivery.getLink());
+
+            // Aborting implicitly remotely settles, so advance
+            // receiver to the next delivery and settle locally.
+            receiver.advance();
+            delivery.settle();
+
+            // Replenish the credit if not doing a drain
+            if (!receiver.getDrain()) {
+               receiver.flow(1);
+            }
+
+            return;
+         }
+
          if (delivery.isPartial()) {
             return;
          }
@@ -209,10 +242,8 @@ public class ProtonServerReceiverContext extends ProtonInitializable implements 
          receiver = ((Receiver) delivery.getLink());
 
          Transaction tx = null;
-         byte[] data;
 
-         data = new byte[delivery.available()];
-         receiver.recv(data, 0, data.length);
+         ReadableBuffer data = receiver.recv();
          receiver.advance();
 
          if (delivery.getRemoteState() instanceof TransactionalState) {
@@ -220,7 +251,7 @@ public class ProtonServerReceiverContext extends ProtonInitializable implements 
             tx = this.sessionSPI.getTransaction(txState.getTxnId(), false);
          }
 
-         sessionSPI.serverSend(tx, receiver, delivery, address, delivery.getMessageFormat(), data);
+         sessionSPI.serverSend(this, tx, receiver, delivery, address, delivery.getMessageFormat(), data);
 
          flow(amqpCredits, minCreditRefresh);
       } catch (Exception e) {
@@ -252,7 +283,7 @@ public class ProtonServerReceiverContext extends ProtonInitializable implements 
       org.apache.qpid.proton.amqp.messaging.Target target = (org.apache.qpid.proton.amqp.messaging.Target) receiver.getRemoteTarget();
       if (target != null && target.getDynamic() && (target.getExpiryPolicy() == TerminusExpiryPolicy.LINK_DETACH || target.getExpiryPolicy() == TerminusExpiryPolicy.SESSION_END)) {
          try {
-            sessionSPI.removeTemporaryQueue(target.getAddress());
+            sessionSPI.removeTemporaryQueue(SimpleString.toSimpleString(target.getAddress()));
          } catch (Exception e) {
             //ignore on close, its temp anyway and will be removed later
          }

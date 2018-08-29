@@ -157,6 +157,8 @@ public class ServerConsumerImpl implements ServerConsumer, ReadyListener {
 
    private boolean anycast = false;
 
+   private boolean isClosed = false;
+
    // Constructors ---------------------------------------------------------------------------------
 
    public ServerConsumerImpl(final long id,
@@ -237,7 +239,7 @@ public class ServerConsumerImpl implements ServerConsumer, ReadyListener {
 
       if (session.getRemotingConnection() instanceof CoreRemotingConnection) {
          CoreRemotingConnection coreRemotingConnection = (CoreRemotingConnection) session.getRemotingConnection();
-         if (session.getMetaData(ClientSession.JMS_SESSION_IDENTIFIER_PROPERTY) != null && coreRemotingConnection.getClientVersion() < PacketImpl.ADDRESSING_CHANGE_VERSION) {
+         if (session.getMetaData(ClientSession.JMS_SESSION_IDENTIFIER_PROPERTY) != null && coreRemotingConnection.getChannelVersion() < PacketImpl.ADDRESSING_CHANGE_VERSION) {
             requiresLegacyPrefix = true;
             if (getQueue().getRoutingType().equals(RoutingType.ANYCAST)) {
                anycast = true;
@@ -409,7 +411,7 @@ public class ServerConsumerImpl implements ServerConsumer, ReadyListener {
             // If updateDeliveries = false (set by strict-update),
             // the updateDeliveryCountAfterCancel would still be updated after c
             if (strictUpdateDeliveryCount && !ref.isPaged()) {
-               if (ref.getMessage().isDurable() && ref.getQueue().isDurable() &&
+               if (ref.getMessage().isDurable() && ref.getQueue().isDurableMessage() &&
                   !ref.getQueue().isInternalQueue() &&
                   !ref.isPaged()) {
                   storageManager.updateDeliveryCount(ref);
@@ -423,7 +425,7 @@ public class ServerConsumerImpl implements ServerConsumer, ReadyListener {
                }
 
                // With pre-ack, we ack *before* sending to the client
-               ref.getQueue().acknowledge(ref);
+               ref.getQueue().acknowledge(ref, this);
                acks++;
             }
 
@@ -444,7 +446,9 @@ public class ServerConsumerImpl implements ServerConsumer, ReadyListener {
       try {
          Message message = reference.getMessage();
 
-         server.callBrokerPlugins(server.hasBrokerPlugins() ? plugin -> plugin.beforeDeliver(this, reference) : null);
+         if (server.hasBrokerMessagePlugins()) {
+            server.callBrokerMessagePlugins(plugin -> plugin.beforeDeliver(this, reference));
+         }
 
          if (message.isLargeMessage() && supportLargeMessage) {
             if (largeMessageDeliverer == null) {
@@ -462,7 +466,9 @@ public class ServerConsumerImpl implements ServerConsumer, ReadyListener {
       } finally {
          lockDelivery.readLock().unlock();
          callback.afterDelivery();
-         server.callBrokerPlugins(server.hasBrokerPlugins() ? plugin -> plugin.afterDeliver(this, reference) : null);
+         if (server.hasBrokerMessagePlugins()) {
+            server.callBrokerMessagePlugins(plugin -> plugin.afterDeliver(this, reference));
+         }
       }
 
    }
@@ -473,12 +479,19 @@ public class ServerConsumerImpl implements ServerConsumer, ReadyListener {
    }
 
    @Override
-   public void close(final boolean failed) throws Exception {
+   public synchronized void close(final boolean failed) throws Exception {
+
+      // Close should only ever be done once per consumer.
+      if (isClosed) return;
+      isClosed = true;
+
       if (logger.isTraceEnabled()) {
          logger.trace("ServerConsumerImpl::" + this + " being closed with failed=" + failed, new Exception("trace"));
       }
 
-      server.callBrokerPlugins(server.hasBrokerPlugins() ? plugin -> plugin.beforeCloseConsumer(this, failed) : null);
+      if (server.hasBrokerConsumerPlugins()) {
+         server.callBrokerConsumerPlugins(plugin -> plugin.beforeCloseConsumer(this, failed));
+      }
 
       setStarted(false);
 
@@ -508,6 +521,8 @@ public class ServerConsumerImpl implements ServerConsumer, ReadyListener {
 
       tx.rollback();
 
+      messageQueue.recheckRefCount(session.getSessionContext());
+
       if (!browseOnly) {
          TypedProperties props = new TypedProperties();
 
@@ -535,7 +550,9 @@ public class ServerConsumerImpl implements ServerConsumer, ReadyListener {
          managementService.sendNotification(notification);
       }
 
-      server.callBrokerPlugins(server.hasBrokerPlugins() ? plugin -> plugin.afterCloseConsumer(this, failed) : null);
+      if (server.hasBrokerConsumerPlugins()) {
+         server.callBrokerConsumerPlugins(plugin -> plugin.afterCloseConsumer(this, failed));
+      }
    }
 
    @Override
@@ -607,8 +624,9 @@ public class ServerConsumerImpl implements ServerConsumer, ReadyListener {
       boolean performACK = lastConsumedAsDelivered;
 
       try {
-         if (largeMessageDeliverer != null) {
-            largeMessageDeliverer.finish();
+         LargeMessageDeliverer pendingLargeMessageDeliverer = largeMessageDeliverer;
+         if (pendingLargeMessageDeliverer != null) {
+            pendingLargeMessageDeliverer.finish();
          }
       } catch (Throwable e) {
          ActiveMQServerLogger.LOGGER.errorResttingLargeMessage(e, largeMessageDeliverer);
@@ -622,7 +640,7 @@ public class ServerConsumerImpl implements ServerConsumer, ReadyListener {
          if (!deliveringRefs.isEmpty()) {
             for (MessageReference ref : deliveringRefs) {
                if (performACK) {
-                  ref.acknowledge(tx);
+                  ref.acknowledge(tx, this);
 
                   performACK = false;
                } else {
@@ -690,7 +708,7 @@ public class ServerConsumerImpl implements ServerConsumer, ReadyListener {
          }
          return true;
       } catch (Exception e) {
-         ActiveMQServerLogger.LOGGER.warn(e.getMessage(), e);
+         ActiveMQServerLogger.LOGGER.failedToFinishDelivery(e);
          return false;
       }
    }
@@ -852,11 +870,11 @@ public class ServerConsumerImpl implements ServerConsumer, ReadyListener {
                throw ils;
             }
 
-            ref.acknowledge(tx);
+            ref.acknowledge(tx, this);
 
             acks++;
          }
-         while (ref.getMessage().getMessageID() != messageID);
+         while (ref.getMessageID() != messageID);
 
          if (startedTransaction) {
             tx.commit();
@@ -915,7 +933,7 @@ public class ServerConsumerImpl implements ServerConsumer, ReadyListener {
             throw ils;
          }
 
-         ref.acknowledge(tx);
+         ref.acknowledge(tx, this);
 
          acks++;
 
@@ -1042,7 +1060,7 @@ public class ServerConsumerImpl implements ServerConsumer, ReadyListener {
 
    @Override
    public void disconnect() {
-      callback.disconnect(this, getQueue().getName().toString());
+      callback.disconnect(this, getQueue().getName());
    }
 
    public float getRate() {
@@ -1294,6 +1312,7 @@ public class ServerConsumerImpl implements ServerConsumer, ReadyListener {
             }
             if (context != null) {
                context.close();
+               context = null;
             }
 
             largeMessage.releaseResources();
@@ -1385,5 +1404,50 @@ public class ServerConsumerImpl implements ServerConsumer, ReadyListener {
          boolean b = !iterator.hasNext();
          return b;
       }
+   }
+
+   @Override
+   public long getSequentialID() {
+      return sequentialID;
+   }
+
+   @Override
+   public SimpleString getQueueName() {
+      return getQueue().getName();
+   }
+
+   @Override
+   public RoutingType getQueueType() {
+      return getQueue().getRoutingType();
+   }
+
+   @Override
+   public SimpleString getQueueAddress() {
+      return getQueue().getAddress();
+   }
+
+   @Override
+   public String getSessionName() {
+      return this.session.getName();
+   }
+
+   @Override
+   public String getConnectionClientID() {
+      return this.session.getRemotingConnection().getClientID();
+   }
+
+   @Override
+   public String getConnectionProtocolName() {
+      return this.session.getRemotingConnection().getProtocolName();
+   }
+
+   @Override
+   public String getConnectionLocalAddress() {
+      return this.session.getRemotingConnection().getTransportConnection().getLocalAddress();
+   }
+
+   @Override
+   public String getConnectionRemoteAddress() {
+      return this.session.getRemotingConnection().getTransportConnection().getRemoteAddress();
    }
 }

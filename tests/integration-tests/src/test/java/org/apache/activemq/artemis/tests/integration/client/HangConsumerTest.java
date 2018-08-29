@@ -152,8 +152,8 @@ public class HangConsumerTest extends ActiveMQTestBase {
          // a flush to guarantee any pending task is finished on flushing out delivery and pending msgs
          queue.flushExecutor();
          Wait.waitFor(() -> getMessageCount(queue) == 2);
-         Assert.assertEquals(2, getMessageCount(queue));
-         Assert.assertEquals(2, getMessagesAdded(queue));
+         Wait.assertEquals(2, queue::getMessageCount);
+         Wait.assertEquals(2, queue::getMessagesAdded);
 
          ClientMessage msg = consumer.receive(5000);
          Assert.assertNotNull(msg);
@@ -585,7 +585,7 @@ public class HangConsumerTest extends ActiveMQTestBase {
       }
 
       @Override
-      public void disconnect(ServerConsumer consumerId, String queueName) {
+      public void disconnect(ServerConsumer consumerId, SimpleString queueName) {
          //To change body of implemented methods use File | Settings | File Templates.
       }
 

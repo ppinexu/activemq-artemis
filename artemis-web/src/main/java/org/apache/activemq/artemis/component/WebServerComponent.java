@@ -23,6 +23,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import org.apache.activemq.artemis.ActiveMQWebLogger;
 import org.apache.activemq.artemis.components.ExternalComponent;
@@ -31,9 +32,11 @@ import org.apache.activemq.artemis.dto.ComponentDTO;
 import org.apache.activemq.artemis.dto.WebServerDTO;
 import org.apache.activemq.artemis.utils.FileUtil;
 import org.apache.activemq.artemis.utils.TimeUtils;
+import org.eclipse.jetty.server.ConnectionFactory;
 import org.eclipse.jetty.server.Connector;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
+import org.eclipse.jetty.server.NCSARequestLog;
 import org.eclipse.jetty.server.SecureRequestCustomizer;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
@@ -41,6 +44,7 @@ import org.eclipse.jetty.server.SslConnectionFactory;
 import org.eclipse.jetty.server.handler.ContextHandler;
 import org.eclipse.jetty.server.handler.DefaultHandler;
 import org.eclipse.jetty.server.handler.HandlerList;
+import org.eclipse.jetty.server.handler.RequestLogHandler;
 import org.eclipse.jetty.server.handler.ResourceHandler;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.webapp.WebAppContext;
@@ -54,7 +58,6 @@ public class WebServerComponent implements ExternalComponent {
    private HandlerList handlers;
    private WebServerDTO webServerConfig;
    private URI uri;
-   private String jolokiaUrl;
    private String consoleUrl;
    private List<WebAppContext> webContexts;
    private ServerConnector connector;
@@ -69,12 +72,12 @@ public class WebServerComponent implements ExternalComponent {
       if ("https".equals(scheme)) {
          SslContextFactory sslFactory = new SslContextFactory();
          sslFactory.setKeyStorePath(webServerConfig.keyStorePath == null ? artemisInstance + "/etc/keystore.jks" : webServerConfig.keyStorePath);
-         sslFactory.setKeyStorePassword(webServerConfig.keyStorePassword == null ? "password" : webServerConfig.keyStorePassword);
+         sslFactory.setKeyStorePassword(webServerConfig.getKeyStorePassword() == null ? "password" : webServerConfig.getKeyStorePassword());
          if (webServerConfig.clientAuth != null) {
             sslFactory.setNeedClientAuth(webServerConfig.clientAuth);
             if (webServerConfig.clientAuth) {
                sslFactory.setTrustStorePath(webServerConfig.trustStorePath);
-               sslFactory.setTrustStorePassword(webServerConfig.trustStorePassword);
+               sslFactory.setTrustStorePassword(webServerConfig.getTrustStorePassword());
             }
          }
 
@@ -82,12 +85,16 @@ public class WebServerComponent implements ExternalComponent {
 
          HttpConfiguration https = new HttpConfiguration();
          https.addCustomizer(new SecureRequestCustomizer());
+         https.setSendServerVersion(false);
          HttpConnectionFactory httpFactory = new HttpConnectionFactory(https);
 
          connector = new ServerConnector(server, sslConnectionFactory, httpFactory);
 
       } else {
-         connector = new ServerConnector(server);
+         HttpConfiguration configuration = new HttpConfiguration();
+         configuration.setSendServerVersion(false);
+         ConnectionFactory connectionFactory = new HttpConnectionFactory(configuration);
+         connector = new ServerConnector(server, connectionFactory);
       }
       connector.setPort(uri.getPort());
       connector.setHost(uri.getHost());
@@ -96,38 +103,121 @@ public class WebServerComponent implements ExternalComponent {
 
       handlers = new HandlerList();
 
-      Path warDir = Paths.get(artemisHome != null ? artemisHome : ".").resolve(webServerConfig.path).toAbsolutePath();
+      Path homeWarDir = Paths.get(artemisHome != null ? artemisHome : ".").resolve(webServerConfig.path).toAbsolutePath();
+      Path instanceWarDir = Paths.get(artemisInstance != null ? artemisInstance : ".").resolve(webServerConfig.path).toAbsolutePath();
 
       if (webServerConfig.apps != null && webServerConfig.apps.size() > 0) {
          webContexts = new ArrayList<>();
          for (AppDTO app : webServerConfig.apps) {
-            WebAppContext webContext = deployWar(app.url, app.war, warDir);
-            webContexts.add(webContext);
-            if (app.war.startsWith("jolokia")) {
-               jolokiaUrl = webServerConfig.bind + "/" + app.url;
+            Path dirToUse = homeWarDir;
+            if (new File(instanceWarDir.toFile().toString() + File.separator + app.war).exists()) {
+               dirToUse = instanceWarDir;
             }
+            WebAppContext webContext = deployWar(app.url, app.war, dirToUse);
+            webContexts.add(webContext);
             if (app.war.startsWith("console")) {
                consoleUrl = webServerConfig.bind + "/" + app.url;
             }
          }
       }
 
-      ResourceHandler resourceHandler = new ResourceHandler();
-      resourceHandler.setResourceBase(warDir.toString());
-      resourceHandler.setDirectoriesListed(true);
-      resourceHandler.setWelcomeFiles(new String[]{"index.html"});
+      ResourceHandler homeResourceHandler = new ResourceHandler();
+      homeResourceHandler.setResourceBase(homeWarDir.toString());
+      homeResourceHandler.setDirectoriesListed(false);
+      homeResourceHandler.setWelcomeFiles(new String[]{"index.html"});
+
+      ContextHandler homeContext = new ContextHandler();
+      homeContext.setContextPath("/");
+      homeContext.setResourceBase(homeWarDir.toString());
+      homeContext.setHandler(homeResourceHandler);
+      homeContext.setInitParameter("org.eclipse.jetty.servlet.Default.dirAllowed", "false");
+
+      ResourceHandler instanceResourceHandler = new ResourceHandler();
+      instanceResourceHandler.setResourceBase(instanceWarDir.toString());
+      instanceResourceHandler.setDirectoriesListed(false);
+      instanceResourceHandler.setWelcomeFiles(new String[]{"index.html"});
+
+      ContextHandler instanceContext = new ContextHandler();
+      instanceContext.setContextPath("/");
+      instanceContext.setResourceBase(instanceWarDir.toString());
+      instanceContext.setHandler(instanceResourceHandler);
+      homeContext.setInitParameter("org.eclipse.jetty.servlet.Default.dirAllowed", "false");
 
       DefaultHandler defaultHandler = new DefaultHandler();
       defaultHandler.setServeIcon(false);
 
-      ContextHandler context = new ContextHandler();
-      context.setContextPath("/");
-      context.setResourceBase(warDir.toString());
-      context.setHandler(resourceHandler);
-
-      handlers.addHandler(context);
+      if (webServerConfig.requestLog != null) {
+         handlers.addHandler(getLogHandler());
+      }
+      handlers.addHandler(homeContext);
+      handlers.addHandler(instanceContext);
       handlers.addHandler(defaultHandler);
       server.setHandler(handlers);
+   }
+
+   private RequestLogHandler getLogHandler() {
+      RequestLogHandler requestLogHandler = new RequestLogHandler();
+      NCSARequestLog requestLog = new NCSARequestLog();
+
+      // required via config so no check necessary
+      requestLog.setFilename(webServerConfig.requestLog.filename);
+
+      if (webServerConfig.requestLog.append != null) {
+         requestLog.setAppend(webServerConfig.requestLog.append);
+      }
+
+      if (webServerConfig.requestLog.extended != null) {
+         requestLog.setExtended(webServerConfig.requestLog.extended);
+      }
+
+      if (webServerConfig.requestLog.logCookies != null) {
+         requestLog.setLogCookies(webServerConfig.requestLog.logCookies);
+      }
+
+      if (webServerConfig.requestLog.logTimeZone != null) {
+         requestLog.setLogTimeZone(webServerConfig.requestLog.logTimeZone);
+      }
+
+      if (webServerConfig.requestLog.filenameDateFormat != null) {
+         requestLog.setFilenameDateFormat(webServerConfig.requestLog.filenameDateFormat);
+      }
+
+      if (webServerConfig.requestLog.retainDays != null) {
+         requestLog.setRetainDays(webServerConfig.requestLog.retainDays);
+      }
+
+      if (webServerConfig.requestLog.ignorePaths != null && webServerConfig.requestLog.ignorePaths.length() > 0) {
+         String[] split = webServerConfig.requestLog.ignorePaths.split(",");
+         String[] ignorePaths = new String[split.length];
+         for (int i = 0; i < ignorePaths.length; i++) {
+            ignorePaths[i] = split[i].trim();
+         }
+         requestLog.setIgnorePaths(ignorePaths);
+      }
+
+      if (webServerConfig.requestLog.logDateFormat != null) {
+         requestLog.setLogDateFormat(webServerConfig.requestLog.logDateFormat);
+      }
+
+      if (webServerConfig.requestLog.logLocale != null) {
+         requestLog.setLogLocale(Locale.forLanguageTag(webServerConfig.requestLog.logLocale));
+      }
+
+      if (webServerConfig.requestLog.logLatency != null) {
+         requestLog.setLogLatency(webServerConfig.requestLog.logLatency);
+      }
+
+      if (webServerConfig.requestLog.logServer != null) {
+         requestLog.setLogServer(webServerConfig.requestLog.logServer);
+      }
+
+      if (webServerConfig.requestLog.preferProxiedForAddress != null) {
+         requestLog.setPreferProxiedForAddress(webServerConfig.requestLog.preferProxiedForAddress);
+      }
+
+      requestLogHandler.setRequestLog(requestLog);
+
+      return requestLogHandler;
    }
 
    @Override
@@ -137,10 +227,9 @@ public class WebServerComponent implements ExternalComponent {
       }
       server.start();
       ActiveMQWebLogger.LOGGER.webserverStarted(webServerConfig.bind);
-      if (jolokiaUrl != null) {
-         ActiveMQWebLogger.LOGGER.jolokiaAvailable(jolokiaUrl);
-      }
+
       if (consoleUrl != null) {
+         ActiveMQWebLogger.LOGGER.jolokiaAvailable(consoleUrl + "/jolokia");
          ActiveMQWebLogger.LOGGER.consoleAvailable(consoleUrl);
       }
    }

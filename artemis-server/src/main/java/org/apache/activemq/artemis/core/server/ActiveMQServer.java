@@ -17,6 +17,7 @@
 package org.apache.activemq.artemis.core.server;
 
 import java.util.Collection;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -51,7 +52,16 @@ import org.apache.activemq.artemis.core.server.impl.AddressInfo;
 import org.apache.activemq.artemis.core.server.impl.ConnectorsService;
 import org.apache.activemq.artemis.core.server.management.ManagementService;
 import org.apache.activemq.artemis.core.server.plugin.ActiveMQPluginRunnable;
-import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerPlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerAddressPlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerBasePlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerBindingPlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerBridgePlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerConnectionPlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerConsumerPlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerCriticalPlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerMessagePlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerQueuePlugin;
+import org.apache.activemq.artemis.core.server.plugin.ActiveMQServerSessionPlugin;
 import org.apache.activemq.artemis.core.server.reload.ReloadManager;
 import org.apache.activemq.artemis.core.settings.HierarchicalRepository;
 import org.apache.activemq.artemis.core.settings.impl.AddressSettings;
@@ -71,6 +81,34 @@ import org.apache.activemq.artemis.utils.critical.CriticalAnalyzer;
  * This is not part of our public API.
  */
 public interface ActiveMQServer extends ServiceComponent {
+
+
+   enum SERVER_STATE {
+      /**
+       * start() has been called but components are not initialized. The whole point of this state,
+       * is to be in a state which is different from {@link SERVER_STATE#STARTED} and
+       * {@link SERVER_STATE#STOPPED}, so that methods testing for these two values such as
+       * {@link #stop(boolean)} worked as intended.
+       */
+      STARTING, /**
+       * server is started. {@code server.isStarted()} returns {@code true}, and all assumptions
+       * about it hold.
+       */
+      STARTED, /**
+       * stop() was called but has not finished yet. Meant to avoids starting components while
+       * stop() is executing.
+       */
+      STOPPING, /**
+       * Stopped: either stop() has been called and has finished running, or start() has never been
+       * called.
+       */
+      STOPPED
+   }
+
+
+   void setState(SERVER_STATE state);
+
+   SERVER_STATE getState();
 
    /**
     * Sets the server identity.
@@ -98,6 +136,8 @@ public interface ActiveMQServer extends ServiceComponent {
    StorageManager getStorageManager();
 
    PagingManager getPagingManager();
+
+   PagingManager createPagingManager() throws Exception;
 
    ManagementService getManagementService();
 
@@ -194,17 +234,71 @@ public interface ActiveMQServer extends ServiceComponent {
     */
    void callPostQueueDeletionCallbacks(SimpleString address, SimpleString queueName) throws Exception;
 
-   void registerBrokerPlugin(ActiveMQServerPlugin plugin);
+   void registerBrokerPlugin(ActiveMQServerBasePlugin plugin);
 
-   void unRegisterBrokerPlugin(ActiveMQServerPlugin plugin);
+   void unRegisterBrokerPlugin(ActiveMQServerBasePlugin plugin);
 
-   void registerBrokerPlugins(List<ActiveMQServerPlugin> plugins);
+   void registerBrokerPlugins(List<ActiveMQServerBasePlugin> plugins);
 
-   List<ActiveMQServerPlugin> getBrokerPlugins();
+   List<ActiveMQServerBasePlugin> getBrokerPlugins();
+
+   List<ActiveMQServerConnectionPlugin> getBrokerConnectionPlugins();
+
+   List<ActiveMQServerSessionPlugin> getBrokerSessionPlugins();
+
+   List<ActiveMQServerConsumerPlugin> getBrokerConsumerPlugins();
+
+   List<ActiveMQServerAddressPlugin> getBrokerAddressPlugins();
+
+   List<ActiveMQServerQueuePlugin> getBrokerQueuePlugins();
+
+   List<ActiveMQServerBindingPlugin> getBrokerBindingPlugins();
+
+   List<ActiveMQServerMessagePlugin> getBrokerMessagePlugins();
+
+   List<ActiveMQServerBridgePlugin> getBrokerBridgePlugins();
+
+   List<ActiveMQServerCriticalPlugin> getBrokerCriticalPlugins();
 
    void callBrokerPlugins(ActiveMQPluginRunnable pluginRun) throws ActiveMQException;
 
+   void callBrokerConnectionPlugins(ActiveMQPluginRunnable<ActiveMQServerConnectionPlugin> pluginRun) throws ActiveMQException;
+
+   void callBrokerSessionPlugins(ActiveMQPluginRunnable<ActiveMQServerSessionPlugin> pluginRun) throws ActiveMQException;
+
+   void callBrokerConsumerPlugins(ActiveMQPluginRunnable<ActiveMQServerConsumerPlugin> pluginRun) throws ActiveMQException;
+
+   void callBrokerAddressPlugins(ActiveMQPluginRunnable<ActiveMQServerAddressPlugin> pluginRun) throws ActiveMQException;
+
+   void callBrokerQueuePlugins(ActiveMQPluginRunnable<ActiveMQServerQueuePlugin> pluginRun) throws ActiveMQException;
+
+   void callBrokerBindingPlugins(ActiveMQPluginRunnable<ActiveMQServerBindingPlugin> pluginRun) throws ActiveMQException;
+
+   void callBrokerMessagePlugins(ActiveMQPluginRunnable<ActiveMQServerMessagePlugin> pluginRun) throws ActiveMQException;
+
+   void callBrokerBridgePlugins(ActiveMQPluginRunnable<ActiveMQServerBridgePlugin> pluginRun) throws ActiveMQException;
+
+   void callBrokerCriticalPlugins(ActiveMQPluginRunnable<ActiveMQServerCriticalPlugin> pluginRun) throws ActiveMQException;
+
    boolean hasBrokerPlugins();
+
+   boolean hasBrokerConnectionPlugins();
+
+   boolean hasBrokerSessionPlugins();
+
+   boolean hasBrokerConsumerPlugins();
+
+   boolean hasBrokerAddressPlugins();
+
+   boolean hasBrokerQueuePlugins();
+
+   boolean hasBrokerBindingPlugins();
+
+   boolean hasBrokerMessagePlugins();
+
+   boolean hasBrokerBridgePlugins();
+
+   boolean hasBrokerCriticalPlugins();
 
    void checkQueueCreationLimit(String username) throws Exception;
 
@@ -304,6 +398,13 @@ public interface ActiveMQServer extends ServiceComponent {
    void createSharedQueue(SimpleString address, RoutingType routingType, SimpleString name, SimpleString filterString,
                           SimpleString user, boolean durable) throws Exception;
 
+   void createSharedQueue(SimpleString address, RoutingType routingType, SimpleString name, SimpleString filterString,
+                          SimpleString user, boolean durable, int maxConsumers, boolean purgeOnNoConsumers, boolean exclusive, boolean lastValue) throws Exception;
+
+   void createSharedQueue(SimpleString address, RoutingType routingType, SimpleString name, SimpleString filterString,
+                          SimpleString user, boolean durable, int maxConsumers, boolean purgeOnNoConsumers, boolean exclusive, boolean lastValue,
+                          int consumersBeforeDispatch, long delayBeforeDispatch) throws Exception;
+
    Queue createQueue(SimpleString address, RoutingType routingType, SimpleString queueName, SimpleString filter,
                      boolean durable, boolean temporary) throws Exception;
 
@@ -315,12 +416,38 @@ public interface ActiveMQServer extends ServiceComponent {
                      boolean autoCreateAddress) throws Exception;
 
    Queue createQueue(SimpleString address, RoutingType routingType, SimpleString queueName, SimpleString filter,
+                     boolean durable, boolean temporary, int maxConsumers, boolean purgeOnNoConsumers, boolean exclusive,
+                     boolean lastValue, int consumersBeforeDispatch, long delayBeforeDispatch, boolean autoCreateAddress) throws Exception;
+
+   Queue createQueue(SimpleString address, RoutingType routingType, SimpleString queueName, SimpleString filter,
                      SimpleString user, boolean durable, boolean temporary, boolean autoCreated, Integer maxConsumers,
                      Boolean purgeOnNoConsumers, boolean autoCreateAddress) throws Exception;
+
+   Queue createQueue(AddressInfo addressInfo, SimpleString queueName, SimpleString filter,
+                     SimpleString user, boolean durable, boolean temporary, boolean autoCreated, Integer maxConsumers,
+                     Boolean purgeOnNoConsumers, boolean autoCreateAddress) throws Exception;
+
+   Queue createQueue(AddressInfo addressInfo, SimpleString queueName, SimpleString filter,
+                     SimpleString user, boolean durable, boolean temporary, boolean autoCreated, Integer maxConsumers,
+                     Boolean purgeOnNoConsumers, Boolean exclusive, Boolean lastValue, boolean autoCreateAddress) throws Exception;
+
+   Queue createQueue(AddressInfo addressInfo, SimpleString queueName, SimpleString filter,
+                     SimpleString user, boolean durable, boolean temporary, boolean autoCreated, Integer maxConsumers,
+                     Boolean purgeOnNoConsumers, Boolean exclusive, Boolean lastValue, Integer consumersBeforeDispatch,
+                     Long delayBeforeDispatch, boolean autoCreateAddress) throws Exception;
 
    Queue createQueue(SimpleString address, RoutingType routingType, SimpleString queueName, SimpleString filter,
                      SimpleString user, boolean durable, boolean temporary, boolean ignoreIfExists, boolean transientQueue,
                      boolean autoCreated, int maxConsumers, boolean purgeOnNoConsumers, boolean autoCreateAddress) throws Exception;
+
+   Queue createQueue(SimpleString address, RoutingType routingType, SimpleString queueName, SimpleString filter,
+                     SimpleString user, boolean durable, boolean temporary, boolean ignoreIfExists, boolean transientQueue,
+                     boolean autoCreated, int maxConsumers, boolean purgeOnNoConsumers, boolean exclusive, boolean lastValue, boolean autoCreateAddress) throws Exception;
+
+   Queue createQueue(SimpleString address, RoutingType routingType, SimpleString queueName, SimpleString filter,
+                     SimpleString user, boolean durable, boolean temporary, boolean ignoreIfExists, boolean transientQueue,
+                     boolean autoCreated, int maxConsumers, boolean purgeOnNoConsumers, boolean exclusive, boolean lastValue, int consumersBeforeDispatch,
+                     long delayBeforeDispatch, boolean autoCreateAddress) throws Exception;
 
    @Deprecated
    Queue createQueue(SimpleString address, SimpleString queueName, SimpleString filter, boolean durable, boolean temporary) throws Exception;
@@ -388,10 +515,34 @@ public interface ActiveMQServer extends ServiceComponent {
 
    void fail(boolean failoverOnServerShutdown) throws Exception;
 
+   void stop(boolean failoverOnServerShutdown, boolean isExit) throws Exception;
+
    Queue updateQueue(String name,
                      RoutingType routingType,
                      Integer maxConsumers,
                      Boolean purgeOnNoConsumers) throws Exception;
+
+   Queue updateQueue(String name,
+                     RoutingType routingType,
+                     Integer maxConsumers,
+                     Boolean purgeOnNoConsumers,
+                     Boolean exclusive) throws Exception;
+
+   Queue updateQueue(String name,
+                     RoutingType routingType,
+                     Integer maxConsumers,
+                     Boolean purgeOnNoConsumers,
+                     Boolean exclusive,
+                     String user) throws Exception;
+
+   Queue updateQueue(String name,
+                     RoutingType routingType,
+                     Integer maxConsumers,
+                     Boolean purgeOnNoConsumers,
+                     Boolean exclusive,
+                     Integer consumersBeforeDispatch,
+                     Long delayBeforeDispatch,
+                     String user) throws Exception;
 
    /*
             * add a ProtocolManagerFactory to be used. Note if @see Configuration#isResolveProtocols is tur then this factory will
@@ -422,6 +573,8 @@ public interface ActiveMQServer extends ServiceComponent {
 
    void addExternalComponent(ActiveMQComponent externalComponent);
 
+   List<ActiveMQComponent> getExternalComponents();
+
    boolean addClientConnection(String clientId, boolean unique);
 
    void removeClientConnection(String clientId);
@@ -438,6 +591,9 @@ public interface ActiveMQServer extends ServiceComponent {
     * @return {@code true} if the {@code AddressInfo} was updated, {@code false} otherwise
     * @throws Exception
     */
+   boolean updateAddressInfo(SimpleString address, EnumSet<RoutingType> routingTypes) throws Exception;
+
+   @Deprecated
    boolean updateAddressInfo(SimpleString address, Collection<RoutingType> routingTypes) throws Exception;
 
    /**
@@ -458,7 +614,6 @@ public interface ActiveMQServer extends ServiceComponent {
     * @throws Exception
     */
    AddressInfo addOrUpdateAddressInfo(AddressInfo addressInfo) throws Exception;
-
    /**
     * Remove an {@code AddressInfo} from the broker.
     *
@@ -467,6 +622,16 @@ public interface ActiveMQServer extends ServiceComponent {
     * @throws Exception
     */
    void removeAddressInfo(SimpleString address, SecurityAuth auth) throws Exception;
+
+   /**
+    * Remove an {@code AddressInfo} from the broker.
+    *
+    * @param address the {@code AddressInfo} to remove
+    * @param auth authorization information; {@code null} is valid
+    * @param force It will disconnect everything from the address including queues and consumers
+    * @throws Exception
+    */
+   void removeAddressInfo(SimpleString address, SecurityAuth auth, boolean force) throws Exception;
 
    String getInternalNamingPrefix();
 

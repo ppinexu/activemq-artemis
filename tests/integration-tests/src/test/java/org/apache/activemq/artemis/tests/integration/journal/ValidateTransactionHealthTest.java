@@ -31,7 +31,7 @@ import org.apache.activemq.artemis.core.journal.PreparedTransactionInfo;
 import org.apache.activemq.artemis.core.journal.RecordInfo;
 import org.apache.activemq.artemis.core.journal.impl.JournalImpl;
 import org.apache.activemq.artemis.jlibaio.LibaioContext;
-import org.apache.activemq.artemis.tests.util.ActiveMQTestBase;
+import org.apache.activemq.artemis.tests.util.SpawnedTestBase;
 import org.apache.activemq.artemis.tests.util.SpawnedVMSupport;
 import org.junit.Assert;
 import org.junit.Test;
@@ -39,7 +39,7 @@ import org.junit.Test;
 /**
  * This test spawns a remote VM, as we want to "crash" the VM right after the journal is filled with data
  */
-public class ValidateTransactionHealthTest extends ActiveMQTestBase {
+public class ValidateTransactionHealthTest extends SpawnedTestBase {
 
    private static final int OK = 10;
 
@@ -352,7 +352,7 @@ public class ValidateTransactionHealthTest extends ActiveMQTestBase {
       } else if (factoryType.equals("nio2")) {
          return new NIOSequentialFileFactory(new File(directory), true, 1);
       } else if (factoryType.equals("mmap")) {
-         return MappedSequentialFileFactory.unbuffered(new File(directory), fileSize, null);
+         return new MappedSequentialFileFactory(new File(directory), fileSize, false, 0, 0, null);
       } else {
          return new NIOSequentialFileFactory(new File(directory), false, 1);
       }

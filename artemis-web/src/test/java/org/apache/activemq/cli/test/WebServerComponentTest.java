@@ -18,6 +18,7 @@ package org.apache.activemq.cli.test;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
+import java.io.File;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
@@ -40,12 +41,15 @@ import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpObject;
 import io.netty.handler.codec.http.HttpRequest;
+import io.netty.handler.codec.http.HttpResponse;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.util.CharsetUtil;
+import org.apache.activemq.artemis.cli.factory.xml.XmlBrokerFactoryHandler;
 import org.apache.activemq.artemis.component.WebServerComponent;
 import org.apache.activemq.artemis.core.remoting.impl.ssl.SSLSupport;
 import org.apache.activemq.artemis.core.server.ActiveMQComponent;
+import org.apache.activemq.artemis.dto.BrokerDTO;
 import org.apache.activemq.artemis.dto.WebServerDTO;
 import org.junit.After;
 import org.junit.Assert;
@@ -107,6 +111,7 @@ public class WebServerComponentTest extends Assert {
       ch.writeAndFlush(request);
       assertTrue(latch.await(5, TimeUnit.SECONDS));
       assertEquals(clientHandler.body, "12345");
+      assertNull(clientHandler.serverHeader);
       // Wait for the server to close the connection.
       ch.close();
       Assert.assertTrue(webServerComponent.isStarted());
@@ -163,7 +168,7 @@ public class WebServerComponentTest extends Assert {
       webServerDTO.bind = "https://localhost:0";
       webServerDTO.path = "webapps";
       webServerDTO.keyStorePath = "./src/test/resources/server.keystore";
-      webServerDTO.keyStorePassword = "password";
+      webServerDTO.setKeyStorePassword("password");
 
       WebServerComponent webServerComponent = new WebServerComponent();
       Assert.assertFalse(webServerComponent.isStarted());
@@ -172,9 +177,73 @@ public class WebServerComponentTest extends Assert {
       webServerComponent.start();
       final int port = webServerComponent.getPort();
       // Make the connection attempt.
-      String keyStoreProvider = "JKS";
 
-      SSLContext context = SSLSupport.createContext(keyStoreProvider, webServerDTO.keyStorePath, webServerDTO.keyStorePassword, keyStoreProvider, webServerDTO.keyStorePath, webServerDTO.keyStorePassword);
+      SSLContext context = new SSLSupport()
+         .setKeystorePath(webServerDTO.keyStorePath)
+         .setKeystorePassword(webServerDTO.getKeyStorePassword())
+         .setTruststorePath(webServerDTO.keyStorePath)
+         .setTruststorePassword(webServerDTO.getKeyStorePassword())
+         .createContext();
+
+      SSLEngine engine = context.createSSLEngine();
+      engine.setUseClientMode(true);
+      engine.setWantClientAuth(true);
+      final SslHandler sslHandler = new SslHandler(engine);
+
+      CountDownLatch latch = new CountDownLatch(1);
+      final ClientHandler clientHandler = new ClientHandler(latch);
+      bootstrap.group(group).channel(NioSocketChannel.class).handler(new ChannelInitializer() {
+         @Override
+         protected void initChannel(Channel ch) throws Exception {
+            ch.pipeline().addLast(sslHandler);
+            ch.pipeline().addLast(new HttpClientCodec());
+            ch.pipeline().addLast(clientHandler);
+         }
+      });
+      Channel ch = bootstrap.connect("localhost", port).sync().channel();
+
+      URI uri = new URI(SECURE_URL);
+      // Prepare the HTTP request.
+      HttpRequest request = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.GET, uri.getRawPath());
+      request.headers().set(HttpHeaderNames.HOST, "localhost");
+
+      // Send the HTTP request.
+      ch.writeAndFlush(request);
+      assertTrue(latch.await(5, TimeUnit.SECONDS));
+      assertEquals(clientHandler.body, "12345");
+      assertNull(clientHandler.serverHeader);
+      // Wait for the server to close the connection.
+      ch.close();
+      Assert.assertTrue(webServerComponent.isStarted());
+      webServerComponent.stop(true);
+      Assert.assertFalse(webServerComponent.isStarted());
+   }
+
+   @Test
+   public void simpleSecureServerWithClientAuth() throws Exception {
+      WebServerDTO webServerDTO = new WebServerDTO();
+      webServerDTO.bind = "https://localhost:0";
+      webServerDTO.path = "webapps";
+      webServerDTO.keyStorePath = "./src/test/resources/server.keystore";
+      webServerDTO.setKeyStorePassword("password");
+      webServerDTO.clientAuth = true;
+      webServerDTO.trustStorePath = "./src/test/resources/server.keystore";
+      webServerDTO.setTrustStorePassword("password");
+
+      WebServerComponent webServerComponent = new WebServerComponent();
+      Assert.assertFalse(webServerComponent.isStarted());
+      webServerComponent.configure(webServerDTO, "./src/test/resources/", "./src/test/resources/");
+      testedComponents.add(webServerComponent);
+      webServerComponent.start();
+      final int port = webServerComponent.getPort();
+      // Make the connection attempt.
+
+      SSLContext context = new SSLSupport()
+         .setKeystorePath(webServerDTO.keyStorePath)
+         .setKeystorePassword(webServerDTO.getKeyStorePassword())
+         .setTruststorePath(webServerDTO.trustStorePath)
+         .setTruststorePassword(webServerDTO.getTrustStorePassword())
+         .createContext();
 
       SSLEngine engine = context.createSSLEngine();
       engine.setUseClientMode(true);
@@ -210,64 +279,48 @@ public class WebServerComponentTest extends Assert {
    }
 
    @Test
-   public void simpleSecureServerWithClientAuth() throws Exception {
-      WebServerDTO webServerDTO = new WebServerDTO();
-      webServerDTO.bind = "https://localhost:0";
-      webServerDTO.path = "webapps";
-      webServerDTO.keyStorePath = "./src/test/resources/server.keystore";
-      webServerDTO.keyStorePassword = "password";
-      webServerDTO.clientAuth = true;
-      webServerDTO.trustStorePath = "./src/test/resources/server.keystore";
-      webServerDTO.trustStorePassword = "password";
+   public void testDefaultMaskPasswords() throws Exception {
+      File bootstrap = new File("./target/test-classes/bootstrap_web.xml");
+      File brokerHome = new File("./target");
+      XmlBrokerFactoryHandler xmlHandler = new XmlBrokerFactoryHandler();
+      BrokerDTO broker = xmlHandler.createBroker(bootstrap.toURI(), brokerHome.getAbsolutePath(), brokerHome.getAbsolutePath(), brokerHome.toURI());
+      assertNotNull(broker.web);
+      assertNull(broker.web.passwordCodec);
+   }
 
-      WebServerComponent webServerComponent = new WebServerComponent();
-      Assert.assertFalse(webServerComponent.isStarted());
-      webServerComponent.configure(webServerDTO, "./src/test/resources/", "./src/test/resources/");
-      testedComponents.add(webServerComponent);
-      webServerComponent.start();
-      final int port = webServerComponent.getPort();
-      // Make the connection attempt.
-      String keyStoreProvider = "JKS";
+   @Test
+   public void testMaskPasswords() throws Exception {
+      final String keyPassword = "keypass";
+      final String trustPassword = "trustpass";
+      File bootstrap = new File("./target/test-classes/bootstrap_secure_web.xml");
+      File brokerHome = new File("./target");
+      XmlBrokerFactoryHandler xmlHandler = new XmlBrokerFactoryHandler();
+      BrokerDTO broker = xmlHandler.createBroker(bootstrap.toURI(), brokerHome.getAbsolutePath(), brokerHome.getAbsolutePath(), brokerHome.toURI());
+      assertNotNull(broker.web);
+      assertEquals(keyPassword, broker.web.getKeyStorePassword());
+      assertEquals(trustPassword, broker.web.getTrustStorePassword());
+   }
 
-      SSLContext context = SSLSupport.createContext(keyStoreProvider, webServerDTO.keyStorePath, webServerDTO.keyStorePassword, keyStoreProvider, webServerDTO.trustStorePath, webServerDTO.trustStorePassword);
+   @Test
+   public void testMaskPasswordCodec() throws Exception {
+      final String keyPassword = "keypass";
+      final String trustPassword = "trustpass";
+      File bootstrap = new File("./target/test-classes/bootstrap_web_codec.xml");
+      File brokerHome = new File("./target");
+      XmlBrokerFactoryHandler xmlHandler = new XmlBrokerFactoryHandler();
+      BrokerDTO broker = xmlHandler.createBroker(bootstrap.toURI(), brokerHome.getAbsolutePath(), brokerHome.getAbsolutePath(), brokerHome.toURI());
+      assertNotNull(broker.web);
+      assertNotNull("password codec not picked up!", broker.web.passwordCodec);
 
-      SSLEngine engine = context.createSSLEngine();
-      engine.setUseClientMode(true);
-      engine.setWantClientAuth(true);
-      final SslHandler sslHandler = new SslHandler(engine);
-
-      CountDownLatch latch = new CountDownLatch(1);
-      final ClientHandler clientHandler = new ClientHandler(latch);
-      bootstrap.group(group).channel(NioSocketChannel.class).handler(new ChannelInitializer() {
-         @Override
-         protected void initChannel(Channel ch) throws Exception {
-            ch.pipeline().addLast(sslHandler);
-            ch.pipeline().addLast(new HttpClientCodec());
-            ch.pipeline().addLast(clientHandler);
-         }
-      });
-      Channel ch = bootstrap.connect("localhost", port).sync().channel();
-
-      URI uri = new URI(SECURE_URL);
-      // Prepare the HTTP request.
-      HttpRequest request = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.GET, uri.getRawPath());
-      request.headers().set(HttpHeaderNames.HOST, "localhost");
-
-      // Send the HTTP request.
-      ch.writeAndFlush(request);
-      assertTrue(latch.await(5, TimeUnit.SECONDS));
-      assertEquals(clientHandler.body, "12345");
-      // Wait for the server to close the connection.
-      ch.close();
-      Assert.assertTrue(webServerComponent.isStarted());
-      webServerComponent.stop(true);
-      Assert.assertFalse(webServerComponent.isStarted());
+      assertEquals(keyPassword, broker.web.getKeyStorePassword());
+      assertEquals(trustPassword, broker.web.getTrustStorePassword());
    }
 
    class ClientHandler extends SimpleChannelInboundHandler<HttpObject> {
 
       private CountDownLatch latch;
       private String body;
+      private String serverHeader;
 
       ClientHandler(CountDownLatch latch) {
          this.latch = latch;
@@ -275,7 +328,10 @@ public class WebServerComponentTest extends Assert {
 
       @Override
       public void channelRead0(ChannelHandlerContext ctx, HttpObject msg) {
-         if (msg instanceof HttpContent) {
+         if (msg instanceof HttpResponse) {
+            HttpResponse response = (HttpResponse) msg;
+            serverHeader = response.headers().get("Server");
+         } else if (msg instanceof HttpContent) {
             HttpContent content = (HttpContent) msg;
             body = content.content().toString(CharsetUtil.UTF_8);
             latch.countDown();

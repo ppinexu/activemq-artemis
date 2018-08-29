@@ -17,6 +17,8 @@
 package org.apache.activemq.artemis.utils;
 
 import java.util.Iterator;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.activemq.artemis.api.core.ActiveMQBuffer;
 import org.apache.activemq.artemis.api.core.ActiveMQBuffers;
@@ -25,6 +27,9 @@ import org.apache.activemq.artemis.utils.collections.TypedProperties;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 
 public class TypedPropertiesTest {
 
@@ -225,5 +230,65 @@ public class TypedPropertiesTest {
    public void setUp() throws Exception {
       props = new TypedProperties();
       key = RandomUtil.randomSimpleString();
+   }
+
+   @Test
+   public void testByteBufStringValuePool() {
+      final int capacity = 8;
+      final int chars = Integer.toString(capacity).length();
+      final TypedProperties.StringValue.ByteBufStringValuePool pool = new TypedProperties.StringValue.ByteBufStringValuePool(capacity, chars);
+      final int bytes = new SimpleString(Integer.toString(capacity)).sizeof();
+      final ByteBuf bb = Unpooled.buffer(bytes, bytes);
+      for (int i = 0; i < capacity; i++) {
+         final SimpleString s = new SimpleString(Integer.toString(i));
+         bb.resetWriterIndex();
+         SimpleString.writeSimpleString(bb, s);
+         bb.resetReaderIndex();
+         final TypedProperties.StringValue expectedPooled = pool.getOrCreate(bb);
+         bb.resetReaderIndex();
+         Assert.assertSame(expectedPooled, pool.getOrCreate(bb));
+         bb.resetReaderIndex();
+      }
+   }
+
+   @Test
+   public void testByteBufStringValuePoolTooLong() {
+      final SimpleString tooLong = new SimpleString("aa");
+      final ByteBuf bb = Unpooled.buffer(tooLong.sizeof(), tooLong.sizeof());
+      SimpleString.writeSimpleString(bb, tooLong);
+      final TypedProperties.StringValue.ByteBufStringValuePool pool = new TypedProperties.StringValue.ByteBufStringValuePool(1, tooLong.length() - 1);
+      Assert.assertNotSame(pool.getOrCreate(bb), pool.getOrCreate(bb.resetReaderIndex()));
+   }
+
+   @Test
+   public void testCopyingWhileMessingUp() throws Exception {
+      TypedProperties properties = new TypedProperties();
+      AtomicBoolean running = new AtomicBoolean(true);
+      AtomicLong copies = new AtomicLong(0);
+      AtomicBoolean error = new AtomicBoolean(false);
+      Thread t = new Thread() {
+         @Override
+         public void run() {
+            while (running.get() && !error.get()) {
+               try {
+                  copies.incrementAndGet();
+                  TypedProperties copiedProperties = new TypedProperties(properties);
+               } catch (Throwable e) {
+                  e.printStackTrace();
+                  error.set(true);
+               }
+            }
+         }
+      };
+      t.start();
+      for (int i = 0; !error.get() && (i < 100 || copies.get() < 50); i++) {
+         properties.putIntProperty(SimpleString.toSimpleString("key" + i), i);
+      }
+
+      running.set(false);
+
+      t.join();
+
+      Assert.assertFalse(error.get());
    }
 }

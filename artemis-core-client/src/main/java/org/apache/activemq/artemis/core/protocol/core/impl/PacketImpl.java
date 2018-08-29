@@ -21,18 +21,23 @@ import io.netty.buffer.Unpooled;
 import org.apache.activemq.artemis.api.core.ActiveMQBuffer;
 import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.core.buffers.impl.ChannelBufferWrapper;
+import org.apache.activemq.artemis.core.protocol.core.CoreRemotingConnection;
 import org.apache.activemq.artemis.core.protocol.core.Packet;
-import org.apache.activemq.artemis.spi.core.protocol.RemotingConnection;
 import org.apache.activemq.artemis.utils.DataConstants;
 
 public class PacketImpl implements Packet {
    // Constants -------------------------------------------------------------------------
 
 
+   // 2.0.0
    public static final int ADDRESSING_CHANGE_VERSION = 129;
+   public static final int SHARED_QUEUE_SECURITY_FIX_CHANGE_VERSION = 130;
+
 
    public static final SimpleString OLD_QUEUE_PREFIX = new SimpleString("jms.queue.");
+   public static final SimpleString OLD_TEMP_QUEUE_PREFIX = new SimpleString("jms.tempqueue.");
    public static final SimpleString OLD_TOPIC_PREFIX = new SimpleString("jms.topic.");
+   public static final SimpleString OLD_TEMP_TOPIC_PREFIX = new SimpleString("jms.temptopic.");
 
    // The minimal size for all the packets, Common data for all the packets (look at
    // PacketImpl.encode)
@@ -305,28 +310,35 @@ public class PacketImpl implements Packet {
    }
 
    @Override
-   public ActiveMQBuffer encode(final RemotingConnection connection) {
+   public ActiveMQBuffer encode(final CoreRemotingConnection connection) {
       ActiveMQBuffer buffer =  createPacket(connection);
 
-      // The standard header fields
-
-      buffer.writeInt(0); // The length gets filled in at the end
-      buffer.writeByte(type);
-      buffer.writeLong(channelID);
+      encodeHeader(buffer);
 
       encodeRest(buffer);
 
+      encodeSize(buffer);
+
+      return buffer;
+   }
+
+   protected void encodeHeader(ActiveMQBuffer buffer) {
+      // The standard header fields
+      buffer.writeInt(0); // The length gets filled in at the end
+      buffer.writeByte(type);
+      buffer.writeLong(channelID);
+   }
+
+   protected void encodeSize(ActiveMQBuffer buffer) {
       size = buffer.writerIndex();
 
       // The length doesn't include the actual length byte
       int len = size - DataConstants.SIZE_INT;
 
       buffer.setInt(0, len);
-
-      return buffer;
    }
 
-   protected ActiveMQBuffer createPacket(RemotingConnection connection) {
+   protected ActiveMQBuffer createPacket(CoreRemotingConnection connection) {
 
       int size = expectedEncodeSize();
 

@@ -17,8 +17,22 @@
 package org.apache.activemq.artemis.core.server.cluster;
 
 import org.apache.activemq.artemis.api.core.Message;
+import org.apache.activemq.artemis.core.server.ServerMessage;
+import org.apache.activemq.artemis.core.server.transformer.ServerMessageImpl;
 
-public interface Transformer {
+/**
+ * This is for back compatibility with package move.
+ */
+@Deprecated
+public interface Transformer extends org.apache.activemq.artemis.core.server.transformer.Transformer {
 
-   Message transform(Message message);
+   @Override
+   default Message transform(Message message) {
+      return transform(new ServerMessageImpl(message)).getICoreMessage();
+   }
+
+   @Deprecated
+   default ServerMessage transform(ServerMessage m) {
+      return m;
+   }
 }

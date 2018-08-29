@@ -123,7 +123,7 @@ public class ArtemisTest extends CliTestBase {
    public void testSync() throws Exception {
       int writes = 2;
       int tries = 5;
-      long totalAvg = SyncCalculation.syncTest(temporaryFolder.getRoot(), 4096, writes, tries, true, true, JournalType.NIO);
+      long totalAvg = SyncCalculation.syncTest(temporaryFolder.getRoot(), 4096, writes, tries, true, true, true, "file.tmp", 1, JournalType.NIO);
       System.out.println();
       System.out.println("TotalAvg = " + totalAvg);
       long nanoTime = SyncCalculation.toNanos(totalAvg, writes, false);
@@ -137,6 +137,13 @@ public class ArtemisTest extends CliTestBase {
       //instance1: default using http
       File instance1 = new File(temporaryFolder.getRoot(), "instance1");
       Artemis.main("create", instance1.getAbsolutePath(), "--silent", "--no-fsync", "--no-autotune");
+   }
+
+
+   @Test
+   public void testCreateDB() throws Exception {
+      File instance1 = new File(temporaryFolder.getRoot(), "instance1");
+      Artemis.internalExecute("create", instance1.getAbsolutePath(), "--silent", "--jdbc");
    }
 
 
@@ -531,7 +538,7 @@ public class ArtemisTest extends CliTestBase {
       Artemis.main("create", instanceFolder.getAbsolutePath(), "--force", "--silent", "--no-web", "--no-autotune", "--require-login");
       System.setProperty("artemis.instance", instanceFolder.getAbsolutePath());
 
-      Artemis.main("perf-journal", "--journal-type", "NIO", "--writes", "5", "--tries", "1", "--verbose");
+      Artemis.main("perf-journal", "--journal-type", "NIO", "--writes", "5", "--tries", "1");
 
    }
 
@@ -574,8 +581,12 @@ public class ArtemisTest extends CliTestBase {
          }
          Artemis.internalExecute("data", "print", "--f");
 
-         assertEquals(Integer.valueOf(100), Artemis.internalExecute("producer", "--message-count", "100", "--verbose", "--user", "admin", "--password", "admin"));
-         assertEquals(Integer.valueOf(100), Artemis.internalExecute("consumer", "--verbose", "--break-on-null", "--receive-timeout", "100", "--user", "admin", "--password", "admin"));
+         assertEquals(Integer.valueOf(100), Artemis.internalExecute("producer", "--message-count", "100", "--user", "admin", "--password", "admin"));
+         assertEquals(Integer.valueOf(100), Artemis.internalExecute("consumer", "--break-on-null", "--receive-timeout", "100", "--user", "admin", "--password", "admin"));
+         assertEquals(Integer.valueOf(10), Artemis.internalExecute("producer", "--text-size", "500", "--message-count", "10", "--user", "admin", "--password", "admin"));
+         assertEquals(Integer.valueOf(10), Artemis.internalExecute("consumer", "--break-on-null", "--receive-timeout", "100", "--user", "admin", "--password", "admin"));
+         assertEquals(Integer.valueOf(10), Artemis.internalExecute("producer", "--message-size", "500", "--message-count", "10", "--user", "admin", "--password", "admin"));
+         assertEquals(Integer.valueOf(10), Artemis.internalExecute("consumer", "--break-on-null", "--receive-timeout", "100", "--user", "admin", "--password", "admin"));
 
          ActiveMQConnectionFactory cf = new ActiveMQConnectionFactory("tcp://localhost:61616");
          Connection connection = cf.createConnection("admin", "admin");
@@ -596,20 +607,20 @@ public class ArtemisTest extends CliTestBase {
          connection.close();
          cf.close();
 
-         assertEquals(Integer.valueOf(1), Artemis.internalExecute("browser", "--txt-size", "50", "--verbose", "--filter", "fruit='banana'", "--user", "admin", "--password", "admin"));
+         assertEquals(Integer.valueOf(1), Artemis.internalExecute("browser", "--txt-size", "50", "--filter", "fruit='banana'", "--user", "admin", "--password", "admin"));
 
-         assertEquals(Integer.valueOf(100), Artemis.internalExecute("browser", "--txt-size", "50", "--verbose", "--filter", "fruit='orange'", "--user", "admin", "--password", "admin"));
+         assertEquals(Integer.valueOf(100), Artemis.internalExecute("browser", "--txt-size", "50", "--filter", "fruit='orange'", "--user", "admin", "--password", "admin"));
 
-         assertEquals(Integer.valueOf(101), Artemis.internalExecute("browser", "--txt-size", "50", "--verbose", "--user", "admin", "--password", "admin"));
+         assertEquals(Integer.valueOf(101), Artemis.internalExecute("browser", "--txt-size", "50", "--user", "admin", "--password", "admin"));
 
          // should only receive 10 messages on browse as I'm setting messageCount=10
-         assertEquals(Integer.valueOf(10), Artemis.internalExecute("browser", "--txt-size", "50", "--verbose", "--message-count", "10", "--user", "admin", "--password", "admin"));
+         assertEquals(Integer.valueOf(10), Artemis.internalExecute("browser", "--txt-size", "50", "--message-count", "10", "--user", "admin", "--password", "admin"));
 
          // Nothing was consumed until here as it was only browsing, check it's receiving again
-         assertEquals(Integer.valueOf(1), Artemis.internalExecute("consumer", "--txt-size", "50", "--verbose", "--break-on-null", "--receive-timeout", "100", "--filter", "fruit='banana'", "--user", "admin", "--password", "admin"));
+         assertEquals(Integer.valueOf(1), Artemis.internalExecute("consumer", "--txt-size", "50", "--break-on-null", "--receive-timeout", "100", "--filter", "fruit='banana'", "--user", "admin", "--password", "admin"));
 
          // Checking it was acked before
-         assertEquals(Integer.valueOf(100), Artemis.internalExecute("consumer", "--txt-size", "50", "--verbose", "--break-on-null", "--receive-timeout", "100", "--user", "admin", "--password", "admin"));
+         assertEquals(Integer.valueOf(100), Artemis.internalExecute("consumer", "--txt-size", "50", "--break-on-null", "--receive-timeout", "100", "--user", "admin", "--password", "admin"));
       } finally {
          stopServer();
       }
@@ -761,6 +772,43 @@ public class ArtemisTest extends CliTestBase {
          // Header line + 0 queues
          Assert.assertEquals("rows returned filtering by MESSAGES_ADDED", 1, lines.size());
 
+         //check  queues with greater_than 19 MESSAGE_ADDED  displayed
+         context = new TestActionContext();
+         statQueue = new StatQueue();
+         statQueue.setUser("admin");
+         statQueue.setPassword("admin");
+         statQueue.setFieldName("MESSAGES_ADDED");
+         statQueue.setOperationName("GREATER_THAN");
+         statQueue.setValue("19");
+         statQueue.execute(context);
+         lines = getOutputLines(context, false);
+
+         // Header line + 1 queues
+         Assert.assertEquals("rows returned filtering by MESSAGES_ADDED", 2, lines.size());
+         String[] columns = lines.get(1).split("\\|");
+         Assert.assertEquals("queue name filtered by MESSAGES_ADDED GREATER_THAN ", "Test20", columns[2].trim());
+
+         //check queues with less_than 2 MESSAGE_ADDED displayed
+         context = new TestActionContext();
+         statQueue = new StatQueue();
+         statQueue.setUser("admin");
+         statQueue.setPassword("admin");
+         statQueue.setFieldName("MESSAGES_ADDED");
+         statQueue.setOperationName("LESS_THAN");
+         statQueue.setValue("2");
+         statQueue.execute(context);
+         lines = getOutputLines(context, false);
+
+         // Header line + "at least" 2 queues
+         Assert.assertTrue("rows returned filtering by MESSAGES_ADDED LESS_THAN", 2 <= lines.size());
+
+         //walk the result returned and the specific destinations are not part of the output
+         for (String line : lines) {
+            columns = line.split("\\|");
+            Assert.assertNotEquals("ensure Test20 is not part of returned result", "Test20", columns[2].trim());
+            Assert.assertNotEquals("ensure Test1 is not part of returned result", "Test1", columns[2].trim());
+         }
+
          //check all queues containing address "Test1" are displayed using Filter field DELIVERING_COUNT
          context = new TestActionContext();
          statQueue = new StatQueue();
@@ -771,7 +819,7 @@ public class ArtemisTest extends CliTestBase {
          statQueue.setValue("10");
          statQueue.execute(context);
          lines = getOutputLines(context, false);
-         String[] columns = lines.get(1).split("\\|");
+         columns = lines.get(1).split("\\|");
          // Header line + 1 queues
          Assert.assertEquals("rows returned filtering by DELIVERING_COUNT", 2, lines.size());
          Assert.assertEquals("queue name filtered by DELIVERING_COUNT ", "Test1", columns[2].trim());

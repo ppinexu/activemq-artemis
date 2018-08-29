@@ -60,7 +60,6 @@ import org.apache.activemq.ActiveMQConnection;
 import org.apache.activemq.ActiveMQConnectionFactory;
 import org.apache.activemq.ActiveMQSession;
 import org.apache.activemq.artemis.api.core.SimpleString;
-import org.apache.activemq.artemis.api.core.management.AddressControl;
 import org.apache.activemq.artemis.api.jms.ActiveMQJMSClient;
 import org.apache.activemq.artemis.core.postoffice.PostOffice;
 import org.apache.activemq.artemis.core.postoffice.impl.LocalQueueBinding;
@@ -73,9 +72,14 @@ import org.apache.activemq.command.ActiveMQQueue;
 import org.apache.activemq.command.ActiveMQTopic;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
 public class SimpleOpenWireTest extends BasicOpenWireTest {
+
+   private final String testString = "simple test string";
+   private final String testProp = "BASE_DATE";
+   private final String propValue = "2017-11-01";
 
    @Override
    @Before
@@ -332,6 +336,95 @@ public class SimpleOpenWireTest extends BasicOpenWireTest {
    }
 
    @Test
+   public void testCompression() throws Exception {
+
+      Connection cconnection = null;
+      Connection connection = null;
+      try {
+         ActiveMQConnectionFactory cfactory = new ActiveMQConnectionFactory("tcp://" + OWHOST + ":" + OWPORT + "");
+         cconnection = cfactory.createConnection();
+         cconnection.start();
+         Session csession = cconnection.createSession(false, Session.AUTO_ACKNOWLEDGE);
+         Queue cQueue = csession.createQueue(queueName);
+         MessageConsumer consumer = csession.createConsumer(cQueue);
+
+         ActiveMQConnectionFactory factory = new ActiveMQConnectionFactory("tcp://" + OWHOST + ":" + OWPORT + "?jms.useCompression=true");
+         connection = factory.createConnection();
+         Session session = connection.createSession(false, Session.AUTO_ACKNOWLEDGE);
+         Queue queue = session.createQueue(queueName);
+
+         MessageProducer producer = session.createProducer(queue);
+         producer.setDeliveryMode(DeliveryMode.PERSISTENT);
+
+         //text
+         TextMessage textMessage = session.createTextMessage();
+         textMessage.setText(testString);
+         TextMessage receivedMessage = sendAndReceive(textMessage, producer, consumer);
+
+         String receivedText = receivedMessage.getText();
+         assertEquals(testString, receivedText);
+
+         //MapMessage
+         MapMessage mapMessage = session.createMapMessage();
+         mapMessage.setString(testProp, propValue);
+         MapMessage receivedMapMessage = sendAndReceive(mapMessage, producer, consumer);
+         String value = receivedMapMessage.getString(testProp);
+         assertEquals(propValue, value);
+
+         //Object
+         ObjectMessage objMessage = session.createObjectMessage();
+         objMessage.setObject(testString);
+         ObjectMessage receivedObjMessage = sendAndReceive(objMessage, producer, consumer);
+         String receivedObj = (String) receivedObjMessage.getObject();
+         assertEquals(testString, receivedObj);
+
+         //Stream
+         StreamMessage streamMessage = session.createStreamMessage();
+         streamMessage.writeString(testString);
+         StreamMessage receivedStreamMessage = sendAndReceive(streamMessage, producer, consumer);
+         String streamValue = receivedStreamMessage.readString();
+         assertEquals(testString, streamValue);
+
+         //byte
+         BytesMessage byteMessage = session.createBytesMessage();
+         byte[] bytes = testString.getBytes();
+         byteMessage.writeBytes(bytes);
+
+         BytesMessage receivedByteMessage = sendAndReceive(byteMessage, producer, consumer);
+         long receivedBodylength = receivedByteMessage.getBodyLength();
+
+         assertEquals("bodylength Correct", bytes.length, receivedBodylength);
+
+         byte[] receivedBytes = new byte[(int) receivedBodylength];
+         receivedByteMessage.readBytes(receivedBytes);
+
+         String receivedString = new String(receivedBytes);
+         assertEquals(testString, receivedString);
+
+         //Message
+         Message m = session.createMessage();
+         sendAndReceive(m, producer, consumer);
+      } finally {
+         if (cconnection != null) {
+            connection.close();
+         }
+         if (connection != null) {
+            cconnection.close();
+         }
+      }
+
+   }
+
+   private <T extends Message> T sendAndReceive(T m, MessageProducer producer, MessageConsumer consumer) throws JMSException {
+      m.setStringProperty(testProp, propValue);
+      producer.send(m);
+      T receivedMessage = (T) consumer.receive(1000);
+      String receivedProp = receivedMessage.getStringProperty(testProp);
+      assertEquals(propValue, receivedProp);
+      return receivedMessage;
+   }
+
+   @Test
    public void testSimpleQueue() throws Exception {
       connection.start();
       Session session = connection.createSession(false, Session.AUTO_ACKNOWLEDGE);
@@ -434,7 +527,8 @@ public class SimpleOpenWireTest extends BasicOpenWireTest {
       }
    }
 
-   //   @Test -- ignored for now
+   @Test
+   @Ignore("ignored for now")
    public void testKeepAlive() throws Exception {
       connection.start();
 
@@ -635,6 +729,9 @@ public class SimpleOpenWireTest extends BasicOpenWireTest {
          TopicSession newTopicSession = newConn.createTopicSession(false, Session.AUTO_ACKNOWLEDGE);
          TopicPublisher publisher = newTopicSession.createPublisher(tempTopic);
 
+         // need to wait here because the ActiveMQ client's temp destination map is updated asynchronously, not waiting can introduce a race
+         assertTrue(Wait.waitFor(() -> newConn.activeTempDestinations.size() == 1, 2000, 100));
+
          TextMessage msg = newTopicSession.createTextMessage("Test Message");
 
          publisher.publish(msg);
@@ -825,10 +922,12 @@ public class SimpleOpenWireTest extends BasicOpenWireTest {
    }
 
    @Test
-   public void testAutoDestinationCreationOnConsumer() throws JMSException {
+   public void testAutoDestinationCreationAndDeletionOnConsumer() throws Exception {
       AddressSettings addressSetting = new AddressSettings();
       addressSetting.setAutoCreateQueues(true);
       addressSetting.setAutoCreateAddresses(true);
+      addressSetting.setAutoDeleteQueues(true);
+      addressSetting.setAutoDeleteAddresses(true);
 
       String address = "foo";
       server.getAddressSettingsRepository().addMatch(address, addressSetting);
@@ -841,11 +940,22 @@ public class SimpleOpenWireTest extends BasicOpenWireTest {
 
       MessageConsumer consumer = session.createConsumer(queue);
 
+      assertTrue(Wait.waitFor(() -> (server.locateQueue(SimpleString.toSimpleString("foo")) != null), 2000, 100));
+      assertTrue(Wait.waitFor(() -> (server.getAddressInfo(SimpleString.toSimpleString("foo")) != null), 2000, 100));
+
       MessageProducer producer = session.createProducer(null);
       producer.send(queue, message);
 
       TextMessage message1 = (TextMessage) consumer.receive(1000);
       assertTrue(message1.getText().equals(message.getText()));
+
+      assertNotNull(server.locateQueue(SimpleString.toSimpleString("foo")));
+
+      consumer.close();
+      connection.close();
+
+      assertTrue(Wait.waitFor(() -> (server.locateQueue(SimpleString.toSimpleString("foo")) == null), 2000, 100));
+      assertTrue(Wait.waitFor(() -> (server.getAddressInfo(SimpleString.toSimpleString("foo")) == null), 2000, 100));
    }
 
    @Test
@@ -1499,11 +1609,10 @@ public class SimpleOpenWireTest extends BasicOpenWireTest {
    public void testTempQueueSendAfterConnectionClose() throws Exception {
 
       Connection connection1 = null;
-      Connection connection2 = null;
+      final Connection connection2 = factory.createConnection();
 
       try {
          connection1 = factory.createConnection();
-         connection2 = factory.createConnection();
          connection1.start();
          connection2.start();
 
@@ -1512,6 +1621,10 @@ public class SimpleOpenWireTest extends BasicOpenWireTest {
 
          Session session2 = connection2.createSession(false, Session.AUTO_ACKNOWLEDGE);
          MessageProducer producer = session2.createProducer(tempQueue);
+
+         // need to wait here because the ActiveMQ client's temp destination map is updated asynchronously, not waiting can introduce a race
+         assertTrue(Wait.waitFor(() -> ((ActiveMQConnection)connection2).activeTempDestinations.size() == 1, 2000, 100));
+
          producer.setDeliveryMode(DeliveryMode.NON_PERSISTENT);
          TextMessage m = session2.createTextMessage("Hello temp queue");
          producer.send(m);
@@ -1524,6 +1637,10 @@ public class SimpleOpenWireTest extends BasicOpenWireTest {
          //close first connection, let temp queue die
          connection1.close();
 
+         // need to wait here because the ActiveMQ client's temp destination map is updated asynchronously, not waiting can introduce a race
+         assertTrue(Wait.waitFor(() -> ((ActiveMQConnection)connection2).activeTempDestinations.size() == 0, 2000, 100));
+
+         waitForBindings(this.server, tempQueue.getQueueName(), true, 0, 0, 5000);
          //send again
          try {
             producer.send(m);
@@ -1651,46 +1768,6 @@ public class SimpleOpenWireTest extends BasicOpenWireTest {
       XidImpl xid1 = new XidImpl(xid);
       Transaction transaction = server.getResourceManager().getTransaction(xid1);
       assertNull(transaction);
-   }
-
-   @Test
-   public void testTempQueueLeak() throws Exception {
-      final Connection[] connections = new Connection[20];
-
-      try {
-         for (int i = 0; i < connections.length; i++) {
-            connections[i] = factory.createConnection();
-            connections[i].start();
-         }
-
-         Session session = connections[0].createSession(false, Session.AUTO_ACKNOWLEDGE);
-
-         for (int i = 0; i < connections.length; i++) {
-            TemporaryQueue temporaryQueue = session.createTemporaryQueue();
-            temporaryQueue.delete();
-         }
-
-         Object[] addressResources = server.getManagementService().getResources(AddressControl.class);
-
-         for (Object addressResource : addressResources) {
-
-            if (((AddressControl) addressResource).getAddress().equals("ActiveMQ.Advisory.TempQueue")) {
-               AddressControl addressControl = (AddressControl) addressResource;
-               Wait.waitFor(() -> addressControl.getMessageCount() == 0);
-               assertNotNull("addressControl for temp advisory", addressControl);
-               assertEquals(0, addressControl.getMessageCount());
-            }
-         }
-
-
-         //sleep a bit to allow message count to go down.
-      } finally {
-         for (Connection conn : connections) {
-            if (conn != null) {
-               conn.close();
-            }
-         }
-      }
    }
 
    private void checkQueueEmpty(String qName) {

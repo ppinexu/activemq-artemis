@@ -23,6 +23,7 @@ import java.util.List;
 import org.apache.activemq.artemis.api.core.ActiveMQBuffer;
 import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.api.core.client.ActiveMQClient;
+import org.apache.activemq.artemis.api.jms.ActiveMQJMSClient;
 import org.apache.activemq.artemis.api.jms.JMSFactoryType;
 import org.apache.activemq.artemis.jms.server.config.ConnectionFactoryConfiguration;
 import org.apache.activemq.artemis.utils.BufferHelper;
@@ -121,6 +122,13 @@ public class ConnectionFactoryConfigurationImpl implements ConnectionFactoryConf
    private String deserializationBlackList;
 
    private String deserializationWhiteList;
+
+   private int initialMessagePacketSize = ActiveMQClient.DEFAULT_INITIAL_MESSAGE_PACKET_SIZE;
+
+   private boolean enable1xPrefixes = ActiveMQJMSClient.DEFAULT_ENABLE_1X_PREFIXES;
+
+   private boolean enableSharedClientID = ActiveMQClient.DEFAULT_ENABLED_SHARED_CLIENT_ID;
+
 
    // Static --------------------------------------------------------
 
@@ -530,6 +538,17 @@ public class ConnectionFactoryConfigurationImpl implements ConnectionFactoryConf
       return this;
    }
 
+   @Override
+   public boolean isEnable1xPrefixes() {
+      return enable1xPrefixes;
+   }
+
+   @Override
+   public ConnectionFactoryConfiguration setEnable1xPrefixes(final boolean enable1xPrefixes) {
+      this.enable1xPrefixes = enable1xPrefixes;
+      return this;
+   }
+
    // Encoding Support Implementation --------------------------------------------------------------
 
    @Override
@@ -621,6 +640,11 @@ public class ConnectionFactoryConfigurationImpl implements ConnectionFactoryConf
       deserializationBlackList = BufferHelper.readNullableSimpleStringAsString(buffer);
 
       deserializationWhiteList = BufferHelper.readNullableSimpleStringAsString(buffer);
+
+      enable1xPrefixes = buffer.readableBytes() > 0 ? buffer.readBoolean() : ActiveMQJMSClient.DEFAULT_ENABLE_1X_PREFIXES;
+
+      enableSharedClientID = buffer.readableBytes() > 0 ? buffer.readBoolean() : ActiveMQClient.DEFAULT_ENABLED_SHARED_CLIENT_ID;
+
    }
 
    @Override
@@ -710,6 +734,10 @@ public class ConnectionFactoryConfigurationImpl implements ConnectionFactoryConf
       BufferHelper.writeAsNullableSimpleString(buffer, deserializationBlackList);
 
       BufferHelper.writeAsNullableSimpleString(buffer, deserializationWhiteList);
+
+      buffer.writeBoolean(enable1xPrefixes);
+
+      BufferHelper.writeNullableBoolean(buffer, enableSharedClientID);
    }
 
    @Override
@@ -823,7 +851,12 @@ public class ConnectionFactoryConfigurationImpl implements ConnectionFactoryConf
 
          BufferHelper.sizeOfNullableSimpleString(deserializationBlackList) +
 
-         BufferHelper.sizeOfNullableSimpleString(deserializationWhiteList);
+         BufferHelper.sizeOfNullableSimpleString(deserializationWhiteList) +
+
+         DataConstants.SIZE_BOOLEAN +
+         // enable1xPrefixes;
+
+         BufferHelper.sizeOfNullableBoolean(enableSharedClientID);
 
       return size;
    }
@@ -879,6 +912,28 @@ public class ConnectionFactoryConfigurationImpl implements ConnectionFactoryConf
    @Override
    public String getProtocolManagerFactoryStr() {
       return protocolManagerFactoryStr;
+   }
+
+   @Override
+   public int getInitialMessagePacketSize() {
+      return initialMessagePacketSize;
+   }
+
+   @Override
+   public ConnectionFactoryConfiguration setInitialMessagePacketSize(int size) {
+      this.initialMessagePacketSize = size;
+      return this;
+   }
+
+   @Override
+   public ConnectionFactoryConfiguration setEnableSharedClientID(boolean enabled) {
+      this.enableSharedClientID = enabled;
+      return this;
+   }
+
+   @Override
+   public boolean isEnableSharedClientID() {
+      return enableSharedClientID;
    }
 
    // Public --------------------------------------------------------

@@ -16,7 +16,13 @@
  */
 package org.apache.activemq.artemis.core.persistence.impl.journal;
 
-import javax.transaction.xa.Xid;
+import static org.apache.activemq.artemis.core.persistence.impl.journal.JournalRecordIds.ACKNOWLEDGE_CURSOR;
+import static org.apache.activemq.artemis.core.persistence.impl.journal.JournalRecordIds.ADD_LARGE_MESSAGE_PENDING;
+import static org.apache.activemq.artemis.core.persistence.impl.journal.JournalRecordIds.DUPLICATE_ID;
+import static org.apache.activemq.artemis.core.persistence.impl.journal.JournalRecordIds.PAGE_CURSOR_COUNTER_INC;
+import static org.apache.activemq.artemis.core.persistence.impl.journal.JournalRecordIds.PAGE_CURSOR_COUNTER_VALUE;
+import static org.apache.activemq.artemis.core.persistence.impl.journal.JournalRecordIds.SET_SCHEDULED_DELIVERY_TIME;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.security.DigestInputStream;
@@ -36,6 +42,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+import javax.transaction.xa.Xid;
 
 import org.apache.activemq.artemis.api.core.ActiveMQBuffer;
 import org.apache.activemq.artemis.api.core.ActiveMQBuffers;
@@ -109,13 +117,6 @@ import org.apache.activemq.artemis.utils.critical.CriticalAnalyzer;
 import org.apache.activemq.artemis.utils.critical.CriticalComponentImpl;
 import org.jboss.logging.Logger;
 
-import static org.apache.activemq.artemis.core.persistence.impl.journal.JournalRecordIds.ACKNOWLEDGE_CURSOR;
-import static org.apache.activemq.artemis.core.persistence.impl.journal.JournalRecordIds.ADD_LARGE_MESSAGE_PENDING;
-import static org.apache.activemq.artemis.core.persistence.impl.journal.JournalRecordIds.DUPLICATE_ID;
-import static org.apache.activemq.artemis.core.persistence.impl.journal.JournalRecordIds.PAGE_CURSOR_COUNTER_INC;
-import static org.apache.activemq.artemis.core.persistence.impl.journal.JournalRecordIds.PAGE_CURSOR_COUNTER_VALUE;
-import static org.apache.activemq.artemis.core.persistence.impl.journal.JournalRecordIds.SET_SCHEDULED_DELIVERY_TIME;
-
 /**
  * Controls access to the journals and other storage files such as the ones used to store pages and
  * large messages.  This class must control writing of any non-transient data, as it is the key point
@@ -125,8 +126,10 @@ import static org.apache.activemq.artemis.core.persistence.impl.journal.JournalR
  */
 public abstract class AbstractJournalStorageManager extends CriticalComponentImpl implements StorageManager {
 
-   private static final int CRITICAL_PATHS = 1;
-   private static final int CRITICAL_STORE = 0;
+   protected static final int CRITICAL_PATHS = 3;
+   protected static final int CRITICAL_STORE = 0;
+   protected static final int CRITICAL_STOP = 1;
+   protected static final int CRITICAL_STOP_2 = 2;
 
    private static final Logger logger = Logger.getLogger(AbstractJournalStorageManager.class);
 
@@ -154,7 +157,7 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
 
    protected BatchingIDGenerator idGenerator;
 
-   protected final ExecutorFactory ioExecutors;
+   protected final ExecutorFactory ioExecutorFactory;
 
    protected final ScheduledExecutorService scheduledExecutorService;
 
@@ -196,15 +199,15 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
                                         final CriticalAnalyzer analyzer,
                                         final ExecutorFactory executorFactory,
                                         final ScheduledExecutorService scheduledExecutorService,
-                                        final ExecutorFactory ioExecutors) {
-      this(config, analyzer, executorFactory, scheduledExecutorService, ioExecutors, null);
+                                        final ExecutorFactory ioExecutorFactory) {
+      this(config, analyzer, executorFactory, scheduledExecutorService, ioExecutorFactory, null);
    }
 
    public AbstractJournalStorageManager(Configuration config,
                                         CriticalAnalyzer analyzer,
                                         ExecutorFactory executorFactory,
                                         ScheduledExecutorService scheduledExecutorService,
-                                        ExecutorFactory ioExecutors,
+                                        ExecutorFactory ioExecutorFactory,
                                         IOCriticalErrorListener criticalErrorListener) {
       super(analyzer, CRITICAL_PATHS);
 
@@ -212,7 +215,7 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
 
       this.ioCriticalErrorListener = criticalErrorListener;
 
-      this.ioExecutors = ioExecutors;
+      this.ioExecutorFactory = ioExecutorFactory;
 
       this.scheduledExecutorService = scheduledExecutorService;
 
@@ -227,6 +230,13 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
 
       idGenerator = new BatchingIDGenerator(0, CHECKPOINT_BATCH_SIZE, this);
    }
+
+
+   @Override
+   public long getMaxRecordSize() {
+      return messageJournal.getMaxRecordSize();
+   }
+
 
    /**
     * Called during initialization.  Used by implementations to setup Journals, Stores etc...
@@ -395,6 +405,16 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
    public void readUnLock() {
       storageManagerLock.readLock().unlock();
       leaveCritical(CRITICAL_STORE);
+   }
+
+   /** for internal use and testsuite, don't use it outside of tests */
+   public void writeLock() {
+      storageManagerLock.writeLock().lock();
+   }
+
+   /** for internal use and testsuite, don't use it outside of tests */
+   public void writeUnlock() {
+      storageManagerLock.writeLock().unlock();
    }
 
    @Override
@@ -649,6 +669,9 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
       try {
          messageJournal.appendCommitRecord(txID, syncTransactional, getContext(syncTransactional), lineUpContext);
          if (!lineUpContext && !syncTransactional) {
+            if (logger.isTraceEnabled()) {
+               logger.trace("calling getContext(true).done() for txID=" + txID + ",lineupContext=" + lineUpContext + " syncTransactional=" + syncTransactional + "... forcing call on getContext(true).done");
+            }
             /**
              * If {@code lineUpContext == false}, it means that we have previously lined up a
              * context somewhere else (specifically see @{link TransactionImpl#asyncAppendCommit}),
@@ -832,6 +855,8 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
 
       List<PreparedTransactionInfo> preparedTransactions = new ArrayList<>();
 
+      Set<PageTransactionInfo> invalidPageTransactions = null;
+
       Map<Long, Message> messages = new HashMap<>();
       readLock();
       try {
@@ -964,6 +989,7 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
                   break;
                }
                case JournalRecordIds.PAGE_TRANSACTION: {
+                  PageTransactionInfo invalidPGTx = null;
                   if (record.isUpdate) {
                      PageUpdateTXEncoding pageUpdate = new PageUpdateTXEncoding();
 
@@ -974,7 +1000,9 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
                      if (pageTX == null) {
                         ActiveMQServerLogger.LOGGER.journalCannotFindPageTX(pageUpdate.pageTX);
                      } else {
-                        pageTX.onUpdate(pageUpdate.recods, null, null);
+                        if (!pageTX.onUpdate(pageUpdate.recods, null, null)) {
+                           invalidPGTx = pageTX;
+                        }
                      }
                   } else {
                      PageTransactionInfoImpl pageTransactionInfo = new PageTransactionInfoImpl();
@@ -984,6 +1012,17 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
                      pageTransactionInfo.setRecordID(record.id);
 
                      pagingManager.addTransaction(pageTransactionInfo);
+
+                     if (!pageTransactionInfo.checkSize(null, null)) {
+                        invalidPGTx = pageTransactionInfo;
+                     }
+                  }
+
+                  if (invalidPGTx != null) {
+                     if (invalidPageTransactions == null) {
+                        invalidPageTransactions = new HashSet<>();
+                     }
+                     invalidPageTransactions.add(invalidPGTx);
                   }
 
                   break;
@@ -1061,7 +1100,7 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
                   PageSubscription sub = locateSubscription(encoding.getQueueID(), pageSubscriptions, queueInfos, pagingManager);
 
                   if (sub != null) {
-                     sub.getCounter().loadValue(record.id, encoding.getValue());
+                     sub.getCounter().loadValue(record.id, encoding.getValue(), encoding.getPersistentSize());
                   } else {
                      ActiveMQServerLogger.LOGGER.journalCannotFindQueueReloadingPage(encoding.getQueueID());
                      messageJournal.appendDeleteRecord(record.id, false);
@@ -1078,7 +1117,7 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
                   PageSubscription sub = locateSubscription(encoding.getQueueID(), pageSubscriptions, queueInfos, pagingManager);
 
                   if (sub != null) {
-                     sub.getCounter().loadInc(record.id, encoding.getValue());
+                     sub.getCounter().loadInc(record.id, encoding.getValue(), encoding.getPersistentSize());
                   } else {
                      ActiveMQServerLogger.LOGGER.journalCannotFindQueueReloadingPageCursor(encoding.getQueueID());
                      messageJournal.appendDeleteRecord(record.id, false);
@@ -1113,6 +1152,7 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
                case JournalRecordIds.PAGE_CURSOR_PENDING_COUNTER: {
 
                   PageCountPendingImpl pendingCountEncoding = new PageCountPendingImpl();
+
                   pendingCountEncoding.decode(buff);
                   pendingCountEncoding.setID(record.id);
 
@@ -1120,6 +1160,7 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
                   if (pendingNonTXPageCounter != null) {
                      pendingNonTXPageCounter.add(pendingCountEncoding);
                   }
+
                   break;
                }
 
@@ -1163,10 +1204,22 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
          }
 
          journalLoader.postLoad(messageJournal, resourceManager, duplicateIDMap);
+
+         checkInvalidPageTransactions(pagingManager, invalidPageTransactions);
+
          journalLoaded = true;
          return info;
       } finally {
          readUnLock();
+      }
+   }
+
+   public void checkInvalidPageTransactions(PagingManager pagingManager,
+                                            Set<PageTransactionInfo> invalidPageTransactions) {
+      if (invalidPageTransactions != null) {
+         for (PageTransactionInfo pginfo : invalidPageTransactions) {
+            pginfo.checkSize(this, pagingManager);
+         }
       }
    }
 
@@ -1237,7 +1290,7 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
 
       SimpleString filterString = filter == null ? null : filter.getFilterString();
 
-      PersistentQueueBindingEncoding bindingEncoding = new PersistentQueueBindingEncoding(queue.getName(), binding.getAddress(), filterString, queue.getUser(), queue.isAutoCreated(), queue.getMaxConsumers(), queue.isPurgeOnNoConsumers(), queue.getRoutingType().getType());
+      PersistentQueueBindingEncoding bindingEncoding = new PersistentQueueBindingEncoding(queue.getName(), binding.getAddress(), filterString, queue.getUser(), queue.isAutoCreated(), queue.getMaxConsumers(), queue.isPurgeOnNoConsumers(), queue.isExclusive(), queue.isLastValue(), queue.getConsumersBeforeDispatch(), queue.getDelayBeforeDispatch(), queue.getRoutingType().getType());
 
       readLock();
       try {
@@ -1314,11 +1367,11 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
    }
 
    @Override
-   public long storePageCounterInc(long txID, long queueID, int value) throws Exception {
+   public long storePageCounterInc(long txID, long queueID, int value, long persistentSize) throws Exception {
       readLock();
       try {
          long recordID = idGenerator.generateID();
-         messageJournal.appendAddRecordTransactional(txID, recordID, JournalRecordIds.PAGE_CURSOR_COUNTER_INC, new PageCountRecordInc(queueID, value));
+         messageJournal.appendAddRecordTransactional(txID, recordID, JournalRecordIds.PAGE_CURSOR_COUNTER_INC, new PageCountRecordInc(queueID, value, persistentSize));
          return recordID;
       } finally {
          readUnLock();
@@ -1326,11 +1379,11 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
    }
 
    @Override
-   public long storePageCounterInc(long queueID, int value) throws Exception {
+   public long storePageCounterInc(long queueID, int value, long persistentSize) throws Exception {
       readLock();
       try {
          final long recordID = idGenerator.generateID();
-         messageJournal.appendAddRecord(recordID, JournalRecordIds.PAGE_CURSOR_COUNTER_INC, new PageCountRecordInc(queueID, value), true, getContext());
+         messageJournal.appendAddRecord(recordID, JournalRecordIds.PAGE_CURSOR_COUNTER_INC, new PageCountRecordInc(queueID, value, persistentSize), true, getContext());
          return recordID;
       } finally {
          readUnLock();
@@ -1338,11 +1391,11 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
    }
 
    @Override
-   public long storePageCounter(long txID, long queueID, long value) throws Exception {
+   public long storePageCounter(long txID, long queueID, long value, long persistentSize) throws Exception {
       readLock();
       try {
          final long recordID = idGenerator.generateID();
-         messageJournal.appendAddRecordTransactional(txID, recordID, JournalRecordIds.PAGE_CURSOR_COUNTER_VALUE, new PageCountRecord(queueID, value));
+         messageJournal.appendAddRecordTransactional(txID, recordID, JournalRecordIds.PAGE_CURSOR_COUNTER_VALUE, new PageCountRecord(queueID, value, persistentSize));
          return recordID;
       } finally {
          readUnLock();
@@ -1350,11 +1403,11 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
    }
 
    @Override
-   public long storePendingCounter(final long queueID, final long pageID, final int inc) throws Exception {
+   public long storePendingCounter(final long queueID, final long pageID) throws Exception {
       readLock();
       try {
          final long recordID = idGenerator.generateID();
-         PageCountPendingImpl pendingInc = new PageCountPendingImpl(queueID, pageID, inc);
+         PageCountPendingImpl pendingInc = new PageCountPendingImpl(queueID, pageID);
          // We must guarantee the record sync before we actually write on the page otherwise we may get out of sync
          // on the counter
          messageJournal.appendAddRecord(recordID, JournalRecordIds.PAGE_CURSOR_PENDING_COUNTER, pendingInc, true);
@@ -1437,12 +1490,12 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
                queueBindingEncoding.addQueueStatusEncoding(statusEncoding);
             } else {
                // unlikely to happen, so I didn't bother about the Logger method
-               logger.info("There is no queue with ID " + statusEncoding.queueID + ", deleting record " + statusEncoding.getId());
+               ActiveMQServerLogger.LOGGER.infoNoQueueWithID(statusEncoding.queueID, statusEncoding.getId());
                this.deleteQueueStatus(statusEncoding.getId());
             }
          } else {
             // unlikely to happen
-            logger.warn("Invalid record type " + rec, new Exception("invalid record type " + rec));
+            ActiveMQServerLogger.LOGGER.invalidRecordType(rec, new Exception("invalid record type " + rec));
          }
       }
 
@@ -1481,7 +1534,7 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
 
       beforeStart();
 
-      singleThreadExecutor = executorFactory.getExecutor();
+      singleThreadExecutor = ioExecutorFactory.getExecutor();
 
       bindingsJournal.start();
 
@@ -1692,7 +1745,9 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
 
                   if (record.isUpdate) {
                      PageTransactionInfo pgTX = pagingManager.getTransaction(pageTransactionInfo.getTransactionID());
-                     pgTX.reloadUpdate(this, pagingManager, tx, pageTransactionInfo.getNumberOfMessages());
+                     if (pgTX != null) {
+                        pgTX.reloadUpdate(this, pagingManager, tx, pageTransactionInfo.getNumberOfMessages());
+                     }
                   } else {
                      pageTransactionInfo.setCommitted(false);
 
@@ -1754,7 +1809,7 @@ public abstract class AbstractJournalStorageManager extends CriticalComponentImp
                   PageSubscription sub = locateSubscription(encoding.getQueueID(), pageSubscriptions, queueInfos, pagingManager);
 
                   if (sub != null) {
-                     sub.getCounter().applyIncrementOnTX(tx, record.id, encoding.getValue());
+                     sub.getCounter().applyIncrementOnTX(tx, record.id, encoding.getValue(), encoding.getPersistentSize());
                      sub.notEmpty();
                   } else {
                      ActiveMQServerLogger.LOGGER.journalCannotFindQueueReloadingACK(encoding.getQueueID());

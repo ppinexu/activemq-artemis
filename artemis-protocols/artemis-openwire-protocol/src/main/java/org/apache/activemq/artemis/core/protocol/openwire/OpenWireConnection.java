@@ -16,13 +16,6 @@
  */
 package org.apache.activemq.artemis.core.protocol.openwire;
 
-import javax.jms.IllegalStateException;
-import javax.jms.InvalidClientIDException;
-import javax.jms.InvalidDestinationException;
-import javax.jms.JMSSecurityException;
-import javax.transaction.xa.XAException;
-import javax.transaction.xa.XAResource;
-import javax.transaction.xa.Xid;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,11 +26,23 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLongFieldUpdater;
+
+import javax.jms.IllegalStateException;
+import javax.jms.InvalidClientIDException;
+import javax.jms.InvalidDestinationException;
+import javax.jms.JMSSecurityException;
+import javax.transaction.xa.XAException;
+import javax.transaction.xa.XAResource;
+import javax.transaction.xa.Xid;
 
 import org.apache.activemq.advisory.AdvisorySupport;
+import org.apache.activemq.artemis.api.core.ActiveMQAddressExistsException;
 import org.apache.activemq.artemis.api.core.ActiveMQBuffer;
 import org.apache.activemq.artemis.api.core.ActiveMQException;
+import org.apache.activemq.artemis.api.core.ActiveMQExceptionType;
 import org.apache.activemq.artemis.api.core.ActiveMQNonExistentQueueException;
+import org.apache.activemq.artemis.api.core.ActiveMQQueueExistsException;
 import org.apache.activemq.artemis.api.core.ActiveMQRemoteDisconnectException;
 import org.apache.activemq.artemis.api.core.ActiveMQSecurityException;
 import org.apache.activemq.artemis.api.core.RoutingType;
@@ -47,7 +52,6 @@ import org.apache.activemq.artemis.core.io.IOCallback;
 import org.apache.activemq.artemis.core.persistence.OperationContext;
 import org.apache.activemq.artemis.core.postoffice.Binding;
 import org.apache.activemq.artemis.core.postoffice.Bindings;
-import org.apache.activemq.artemis.core.postoffice.QueueBinding;
 import org.apache.activemq.artemis.core.protocol.openwire.amq.AMQCompositeConsumerBrokerExchange;
 import org.apache.activemq.artemis.core.protocol.openwire.amq.AMQConnectionContext;
 import org.apache.activemq.artemis.core.protocol.openwire.amq.AMQConsumer;
@@ -57,7 +61,6 @@ import org.apache.activemq.artemis.core.protocol.openwire.amq.AMQSession;
 import org.apache.activemq.artemis.core.protocol.openwire.amq.AMQSingleConsumerBrokerExchange;
 import org.apache.activemq.artemis.core.protocol.openwire.util.OpenWireUtil;
 import org.apache.activemq.artemis.core.remoting.FailureListener;
-import org.apache.activemq.artemis.core.security.CheckType;
 import org.apache.activemq.artemis.core.security.SecurityAuth;
 import org.apache.activemq.artemis.core.server.ActiveMQMessageBundle;
 import org.apache.activemq.artemis.core.server.ActiveMQServer;
@@ -69,14 +72,15 @@ import org.apache.activemq.artemis.core.server.ServerConsumer;
 import org.apache.activemq.artemis.core.server.ServerSession;
 import org.apache.activemq.artemis.core.server.SlowConsumerDetectionListener;
 import org.apache.activemq.artemis.core.server.TempQueueObserver;
+import org.apache.activemq.artemis.core.server.impl.AddressInfo;
 import org.apache.activemq.artemis.core.server.impl.RefsOperation;
+import org.apache.activemq.artemis.core.settings.impl.AddressSettings;
 import org.apache.activemq.artemis.core.transaction.ResourceManager;
 import org.apache.activemq.artemis.core.transaction.Transaction;
 import org.apache.activemq.artemis.core.transaction.TransactionOperationAbstract;
 import org.apache.activemq.artemis.core.transaction.TransactionPropertyIndexes;
 import org.apache.activemq.artemis.spi.core.protocol.AbstractRemotingConnection;
 import org.apache.activemq.artemis.spi.core.protocol.ConnectionEntry;
-import org.apache.activemq.artemis.spi.core.protocol.RemotingConnection;
 import org.apache.activemq.artemis.spi.core.remoting.Connection;
 import org.apache.activemq.artemis.utils.UUIDGenerator;
 import org.apache.activemq.artemis.utils.collections.ConcurrentHashSet;
@@ -126,7 +130,6 @@ import org.apache.activemq.state.ProducerState;
 import org.apache.activemq.state.SessionState;
 import org.apache.activemq.transport.TransmitCallback;
 import org.apache.activemq.util.ByteSequence;
-import org.apache.activemq.wireformat.WireFormat;
 import org.jboss.logging.Logger;
 
 /**
@@ -142,9 +145,10 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
 
    private boolean destroyed = false;
 
-   private final Object sendLock = new Object();
+   //separated in/out wireFormats allow deliveries (eg async and consumers) to not slow down bufferReceived
+   private final OpenWireFormat inWireFormat;
 
-   private final OpenWireFormat wireFormat;
+   private final OpenWireFormat outWireFormat;
 
    private AMQConnectionContext context;
 
@@ -174,13 +178,14 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
    private final ActiveMQServer server;
 
    /**
-    * This is to be used with connection operations that don't have  a session.
+    * This is to be used with connection operations that don't have a session.
     * Such as TM operations.
     */
    private ServerSession internalSession;
 
    private final OperationContext operationContext;
 
+   private static final AtomicLongFieldUpdater<OpenWireConnection> LAST_SENT_UPDATER = AtomicLongFieldUpdater.newUpdater(OpenWireConnection.class, "lastSent");
    private volatile long lastSent = -1;
    private ConnectionEntry connectionEntry;
    private boolean useKeepAlive;
@@ -188,7 +193,7 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
 
    private final Set<SimpleString> knownDestinations = new ConcurrentHashSet<>();
 
-   private AtomicBoolean disableTtl = new AtomicBoolean(false);
+   private final AtomicBoolean disableTtl = new AtomicBoolean(false);
 
    public OpenWireConnection(Connection connection,
                              ActiveMQServer server,
@@ -199,7 +204,8 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
       this.server = server;
       this.operationContext = server.newOperationContext();
       this.protocolManager = openWireProtocolManager;
-      this.wireFormat = wf;
+      this.inWireFormat = wf;
+      this.outWireFormat = wf.copy();
       this.useKeepAlive = openWireProtocolManager.isUseKeepAlive();
       this.maxInactivityDuration = openWireProtocolManager.getMaxInactivityDuration();
    }
@@ -221,7 +227,7 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
 
    // SecurityAuth implementation
    @Override
-   public RemotingConnection getRemotingConnection() {
+   public OpenWireConnection getRemotingConnection() {
       return this;
    }
 
@@ -248,8 +254,16 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
 
    //tells the connection that
    //some bytes just sent
-   public void bufferSent() {
-      lastSent = System.currentTimeMillis();
+   private void bufferSent() {
+      //much cheaper than a volatile set if contended, but less precise (ie allows stale loads)
+      LAST_SENT_UPDATER.lazySet(this, System.currentTimeMillis());
+   }
+
+   /**
+    * Log packaged into a separate method for performance reasons.
+    */
+   private static void traceBufferReceived(Object connectionID, Command command) {
+      logger.trace("connectionID: " + connectionID + " RECEIVED: " + (command == null ? "NULL" : command));
    }
 
    @Override
@@ -259,7 +273,12 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
 
          recoverOperationContext();
 
-         Command command = (Command) wireFormat.unmarshal(buffer);
+         Command command = (Command) inWireFormat.unmarshal(buffer);
+
+         // log the openwire command
+         if (logger.isTraceEnabled()) {
+            traceBufferReceived(connectionID, command);
+         }
 
          boolean responseRequired = command.isResponseRequired();
          int commandId = command.getCommandId();
@@ -281,10 +300,15 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
             }
 
             if (response instanceof ExceptionResponse) {
+               Throwable cause = ((ExceptionResponse)response).getException();
                if (!responseRequired) {
-                  Throwable cause = ((ExceptionResponse) response).getException();
                   serviceException(cause);
                   response = null;
+               }
+               // If there was an exception when processing ConnectionInfo we should
+               // stop the connection to prevent dangling sockets
+               if (command instanceof ConnectionInfo) {
+                  delayedStop(2000, cause.getMessage(), cause);
                }
             }
 
@@ -425,7 +449,7 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
 
    // send a WireFormatInfo to the peer
    public void sendHandshake() {
-      WireFormatInfo info = wireFormat.getPreferedWireFormatInfo();
+      WireFormatInfo info = inWireFormat.getPreferedWireFormatInfo();
       sendCommand(info);
    }
 
@@ -433,13 +457,25 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
       return state;
    }
 
+   /**
+    * Log packaged into a separate method for performance reasons.
+    */
+   private static void tracePhysicalSend(Connection transportConnection, Command command) {
+      logger.trace("connectionID: " + (transportConnection == null ? "" : transportConnection.getID()) + " SENDING: " + (command == null ? "NULL" : command));
+   }
+
    public void physicalSend(Command command) throws IOException {
+
+      if (logger.isTraceEnabled()) {
+         tracePhysicalSend(transportConnection, command);
+      }
+
       try {
-         ByteSequence bytes = wireFormat.marshal(command);
-         ActiveMQBuffer buffer = OpenWireUtil.toActiveMQBuffer(bytes);
-         synchronized (sendLock) {
-            getTransportConnection().write(buffer, false, false);
-         }
+         final ByteSequence bytes = outWireFormat.marshal(command);
+         final int bufferSize = bytes.length;
+         final ActiveMQBuffer buffer = transportConnection.createTransportBuffer(bufferSize);
+         buffer.writeBytes(bytes.data, bytes.offset, bufferSize);
+         transportConnection.write(buffer, false, false);
          bufferSent();
       } catch (IOException e) {
          throw e;
@@ -549,8 +585,8 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
       sendCommand(dispatch);
    }
 
-   public WireFormat getMarshaller() {
-      return this.wireFormat;
+   public OpenWireFormat wireFormat() {
+      return this.inWireFormat;
    }
 
    private void shutdown(boolean fail) {
@@ -573,14 +609,24 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
       // is it necessary? even, do we need state at all?
       state.shutdown();
 
+      try {
+         for (SessionId sessionId : sessionIdMap.values()) {
+            AMQSession session = sessions.get(sessionId);
+            if (session != null) {
+               session.close();
+            }
+         }
+         internalSession.close(false);
+      } catch (Exception e) {
+         ActiveMQServerLogger.LOGGER.warn(e.getMessage(), e);
+      }
+
       // Then call the listeners
       // this should closes underlying sessions
       callFailureListeners(me);
 
       // this should clean up temp dests
-      synchronized (sendLock) {
-         callClosingListeners();
-      }
+      callClosingListeners();
 
       destroyed = true;
 
@@ -612,11 +658,27 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
          }
       }
       try {
-         protocolManager.removeConnection(this.getConnectionInfo(), me);
+         if (this.getConnectionInfo() != null) {
+            protocolManager.removeConnection(this.getConnectionInfo(), me);
+         }
       } catch (InvalidClientIDException e) {
          ActiveMQServerLogger.LOGGER.warn("Couldn't close connection because invalid clientID", e);
       }
       shutdown(true);
+   }
+
+   private void delayedStop(final int waitTimeMillis, final String reason, Throwable cause) {
+      if (waitTimeMillis > 0) {
+         try {
+            protocolManager.getScheduledPool().schedule(() -> {
+               fail(new ActiveMQException(reason, cause, ActiveMQExceptionType.GENERIC_EXCEPTION), reason);
+               ActiveMQServerLogger.LOGGER.warn("Stopping " + transportConnection.getRemoteAddress() + "because " +
+                        reason);
+            }, waitTimeMillis, TimeUnit.MILLISECONDS);
+         } catch (Throwable t) {
+            ActiveMQServerLogger.LOGGER.warn("Cannot stop connection. This exception will be ignored.", t);
+         }
+      }
    }
 
    public void setAdvisorySession(AMQSession amqSession) {
@@ -638,7 +700,7 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
    }
 
    public AMQConnectionContext initContext(ConnectionInfo info) throws Exception {
-      WireFormatInfo wireFormatInfo = wireFormat.getPreferedWireFormatInfo();
+      WireFormatInfo wireFormatInfo = inWireFormat.getPreferedWireFormatInfo();
       // Older clients should have been defaulting this field to true.. but
       // they were not.
       if (wireFormatInfo != null && wireFormatInfo.getVersion() <= 2) {
@@ -681,7 +743,7 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
    //raise the refCount of context
    public void reconnect(AMQConnectionContext existingContext, ConnectionInfo info) {
       this.context = existingContext;
-      WireFormatInfo wireFormatInfo = wireFormat.getPreferedWireFormatInfo();
+      WireFormatInfo wireFormatInfo = inWireFormat.getPreferedWireFormatInfo();
       // Older clients should have been defaulting this field to true.. but
       // they were not.
       if (wireFormatInfo != null && wireFormatInfo.getVersion() <= 2) {
@@ -725,19 +787,34 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
    }
 
    public void addDestination(DestinationInfo info) throws Exception {
+      boolean created = false;
       ActiveMQDestination dest = info.getDestination();
-      if (dest.isQueue()) {
-         SimpleString qName = new SimpleString(dest.getPhysicalName());
-         QueueBinding binding = (QueueBinding) server.getPostOffice().getBinding(qName);
-         if (binding == null) {
-            if (dest.isTemporary()) {
-               internalSession.createQueue(qName, qName, RoutingType.ANYCAST, null, dest.isTemporary(), false);
-            } else {
-               ConnectionInfo connInfo = getState().getInfo();
-               CheckType checkType = dest.isTemporary() ? CheckType.CREATE_NON_DURABLE_QUEUE : CheckType.CREATE_DURABLE_QUEUE;
-               server.getSecurityStore().check(qName, checkType, this);
-               server.checkQueueCreationLimit(getUsername());
-               server.createQueue(qName, RoutingType.ANYCAST, qName, connInfo == null ? null : SimpleString.toSimpleString(connInfo.getUserName()), null,true, false);
+      if (!protocolManager.isSupportAdvisory() && AdvisorySupport.isAdvisoryTopic(dest)) {
+         return;
+      }
+
+      SimpleString qName = SimpleString.toSimpleString(dest.getPhysicalName());
+      if (server.locateQueue(qName) == null) {
+         AddressSettings addressSettings = server.getAddressSettingsRepository().getMatch(dest.getPhysicalName());
+         AddressInfo addressInfo = new AddressInfo(qName, dest.isTopic() ? RoutingType.MULTICAST : RoutingType.ANYCAST);
+         if (AdvisorySupport.isAdvisoryTopic(dest) && protocolManager.isSuppressInternalManagementObjects()) {
+            addressInfo.setInternal(true);
+         }
+         if (dest.isQueue() && (addressSettings.isAutoCreateQueues() || dest.isTemporary())) {
+            try {
+               internalSession.createQueue(addressInfo, qName, null, dest.isTemporary(), !dest.isTemporary(), !dest.isTemporary());
+               created = true;
+            } catch (ActiveMQQueueExistsException exists) {
+               // The queue may have been created by another thread in the mean time.  Catch and do nothing.
+            }
+         } else if (dest.isTopic() && (addressSettings.isAutoCreateAddresses() || dest.isTemporary())) {
+            try {
+               if (internalSession.getAddress(addressInfo.getName()) == null) {
+                  internalSession.createAddress(addressInfo, !dest.isTemporary());
+                  created = true;
+               }
+            } catch (ActiveMQAddressExistsException exists) {
+               // The address may have been created by another thread in the mean time.  Catch and do nothing.
             }
          }
       }
@@ -748,7 +825,7 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
          this.state.addTempDestination(info);
       }
 
-      if (!AdvisorySupport.isAdvisoryTopic(dest)) {
+      if (created && !AdvisorySupport.isAdvisoryTopic(dest)) {
          AMQConnectionContext context = getContext();
          DestinationInfo advInfo = new DestinationInfo(context.getConnectionId(), DestinationInfo.ADD_OPERATION_TYPE, dest);
 
@@ -786,6 +863,9 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
          }
 
          List<AMQConsumer> consumersList = amqSession.createConsumer(info, new SlowConsumerDetection());
+         if (consumersList.size() == 0) {
+            return;
+         }
 
          this.addConsumerBrokerExchange(info.getConsumerId(), amqSession, consumersList);
          ss.addConsumer(info);
@@ -881,6 +961,14 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
       return state.getTempDestinations();
    }
 
+   public boolean isSuppressInternalManagementObjects() {
+      return protocolManager.isSuppressInternalManagementObjects();
+   }
+
+   public boolean isSuppportAdvisory() {
+      return protocolManager.isSupportAdvisory();
+   }
+
    class SlowConsumerDetection implements SlowConsumerDetectionListener {
 
       @Override
@@ -925,6 +1013,7 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
    public void removeSession(AMQConnectionContext context, SessionInfo info) throws Exception {
       AMQSession session = sessions.remove(info.getSessionId());
       if (session != null) {
+         sessionIdMap.remove(session.getCoreSession().getName());
          session.close();
       }
    }
@@ -936,7 +1025,7 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
    public void removeDestination(ActiveMQDestination dest) throws Exception {
       if (dest.isQueue()) {
          try {
-            server.destroyQueue(new SimpleString(dest.getPhysicalName()));
+            server.destroyQueue(new SimpleString(dest.getPhysicalName()), getRemotingConnection());
          } catch (ActiveMQNonExistentQueueException neq) {
             //this is ok, ActiveMQ 5 allows this and will actually do it quite often
             ActiveMQServerLogger.LOGGER.debug("queue never existed");
@@ -1094,7 +1183,7 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
 
       @Override
       public Response processRemoveSubscription(RemoveSubscriptionInfo subInfo) throws Exception {
-         SimpleString subQueueName = new SimpleString(org.apache.activemq.artemis.jms.client.ActiveMQDestination.createQueueNameForSubscription(true, subInfo.getClientId(), subInfo.getSubscriptionName()));
+         SimpleString subQueueName = org.apache.activemq.artemis.jms.client.ActiveMQDestination.createQueueNameForSubscription(true, subInfo.getClientId(), subInfo.getSubscriptionName());
          server.destroyQueue(subQueueName);
 
          return null;
@@ -1103,7 +1192,13 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
       @Override
       public Response processRollbackTransaction(TransactionInfo info) throws Exception {
          Transaction tx = lookupTX(info.getTransactionId(), null, true);
-         AMQSession amqSession = (AMQSession) tx.getProtocolData();
+
+         final AMQSession amqSession;
+         if (tx != null) {
+            amqSession = (AMQSession) tx.getProtocolData();
+         } else {
+            amqSession = null;
+         }
 
          if (info.getTransactionId().isXATransaction() && tx == null) {
             throw newXAException("Transaction '" + info.getTransactionId() + "' has not been started.", XAException.XAER_NOTA);
@@ -1189,17 +1284,17 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
             for (ListIterator<MessageReference> referenceIterator = ackRefs.listIterator(ackRefs.size()); referenceIterator.hasPrevious(); ) {
                MessageReference ref = referenceIterator.previous();
 
-               Long consumerID = ref.getConsumerId();
-
                ServerConsumer consumer = null;
-               if (consumerID != null) {
-                  consumer = session.getCoreSession().locateConsumer(consumerID);
+               if (ref.hasConsumerId()) {
+                  consumer = session.getCoreSession().locateConsumer(ref.getConsumerId());
                }
 
                if (consumer != null) {
                   referenceIterator.remove();
                   ref.incrementDeliveryCount();
                   consumer.backToDelivering(ref);
+                  final AMQConsumer amqConsumer = (AMQConsumer) consumer.getProtocolData();
+                  amqConsumer.addRolledback(ref);
                }
             }
          }
@@ -1213,10 +1308,11 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
 
       @Override
       public Response processWireFormat(WireFormatInfo command) throws Exception {
-         wireFormat.renegotiateWireFormat(command);
+         inWireFormat.renegotiateWireFormat(command);
+         outWireFormat.renegotiateWireFormat(command);
          //throw back a brokerInfo here
          protocolManager.sendBrokerInfo(OpenWireConnection.this);
-         protocolManager.setUpInactivityParams(OpenWireConnection.this, command);
+         protocolManager.configureInactivityParams(OpenWireConnection.this, command);
          return null;
       }
 
@@ -1368,7 +1464,7 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
             internalSession.resetTX(null);
          }
 
-         return new IntegerResponse(XAResource.XA_RDONLY);
+         return new IntegerResponse(XAResource.XA_OK);
       }
 
       @Override
@@ -1616,6 +1712,12 @@ public class OpenWireConnection extends AbstractRemotingConnection implements Se
 
    @Override
    public String getClientID() {
-      return context.getClientId();
+      return context != null ? context.getClientId() : null;
    }
+
+   @Override
+   public String getTransportLocalAddress() {
+      return transportConnection.getLocalAddress();
+   }
+
 }

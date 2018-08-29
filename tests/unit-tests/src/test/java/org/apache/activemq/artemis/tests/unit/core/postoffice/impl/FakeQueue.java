@@ -27,10 +27,13 @@ import org.apache.activemq.artemis.api.core.RoutingType;
 import org.apache.activemq.artemis.api.core.SimpleString;
 import org.apache.activemq.artemis.core.filter.Filter;
 import org.apache.activemq.artemis.core.paging.cursor.PageSubscription;
+import org.apache.activemq.artemis.core.persistence.OperationContext;
+import org.apache.activemq.artemis.core.postoffice.Binding;
 import org.apache.activemq.artemis.core.server.Consumer;
 import org.apache.activemq.artemis.core.server.MessageReference;
 import org.apache.activemq.artemis.core.server.Queue;
 import org.apache.activemq.artemis.core.server.RoutingContext;
+import org.apache.activemq.artemis.core.server.ServerConsumer;
 import org.apache.activemq.artemis.core.server.impl.AckReason;
 import org.apache.activemq.artemis.core.transaction.Transaction;
 import org.apache.activemq.artemis.utils.ReferenceCounter;
@@ -43,6 +46,58 @@ public class FakeQueue extends CriticalComponentImpl implements Queue {
    @Override
    public void setPurgeOnNoConsumers(boolean value) {
 
+   }
+
+   @Override
+   public int getConsumersBeforeDispatch() {
+      return 0;
+   }
+
+   @Override
+   public void setConsumersBeforeDispatch(int consumersBeforeDispatch) {
+
+   }
+
+   @Override
+   public long getDelayBeforeDispatch() {
+      return 0;
+   }
+
+   @Override
+   public void setDelayBeforeDispatch(long delayBeforeDispatch) {
+
+   }
+
+   @Override
+   public long getDispatchStartTime() {
+      return 0;
+   }
+
+   @Override
+   public boolean isDispatching() {
+      return false;
+   }
+
+   @Override
+   public void setDispatching(boolean dispatching) {
+
+   }
+
+   @Override
+   public boolean isExclusive() {
+      // no-op
+      return false;
+   }
+
+   @Override
+   public void setExclusive(boolean value) {
+      // no-op
+   }
+
+   @Override
+   public boolean isLastValue() {
+      // no-op
+      return false;
    }
 
    @Override
@@ -72,6 +127,11 @@ public class FakeQueue extends CriticalComponentImpl implements Queue {
 
    @Override
    public void reloadPause(long recordID) {
+
+   }
+
+   @Override
+   public void recheckRefCount(OperationContext context) {
 
    }
 
@@ -189,7 +249,13 @@ public class FakeQueue extends CriticalComponentImpl implements Queue {
    }
 
    @Override
-   public void acknowledge(MessageReference ref, AckReason reason) throws Exception {
+   public void acknowledge(final MessageReference ref, ServerConsumer consumer) throws Exception {
+      // no-op
+
+   }
+
+   @Override
+   public void acknowledge(MessageReference ref, AckReason reason, ServerConsumer consumer) throws Exception {
       // no-op
 
    }
@@ -201,7 +267,7 @@ public class FakeQueue extends CriticalComponentImpl implements Queue {
    }
 
    @Override
-   public void acknowledge(Transaction tx, MessageReference ref, AckReason reason) throws Exception {
+   public void acknowledge(Transaction tx, MessageReference ref, AckReason reason, ServerConsumer consumer) throws Exception {
       // no-op
 
    }
@@ -287,6 +353,12 @@ public class FakeQueue extends CriticalComponentImpl implements Queue {
    }
 
    @Override
+   public void expire(final MessageReference ref, final ServerConsumer consumer) throws Exception {
+      // no-op
+
+   }
+
+   @Override
    public boolean expireReference(final long messageID) throws Exception {
       // no-op
       return false;
@@ -305,6 +377,7 @@ public class FakeQueue extends CriticalComponentImpl implements Queue {
    }
 
    @Override
+
    public int getConsumerCount() {
       // no-op
       return 0;
@@ -322,6 +395,26 @@ public class FakeQueue extends CriticalComponentImpl implements Queue {
    }
 
    @Override
+   public Map<SimpleString, Consumer> getGroups() {
+      return null;
+   }
+
+   @Override
+   public void resetGroup(SimpleString groupID) {
+
+   }
+
+   @Override
+   public void resetAllGroups() {
+
+   }
+
+   @Override
+   public int getGroupCount() {
+      return 0;
+   }
+
+   @Override
    public int getDeliveringCount() {
       // no-op
       return 0;
@@ -336,6 +429,21 @@ public class FakeQueue extends CriticalComponentImpl implements Queue {
    @Override
    public long getMessageCount() {
       return messageCount;
+   }
+
+   @Override
+   public long getPersistentSize() {
+      return 0;
+   }
+
+   @Override
+   public long getDurableMessageCount() {
+      return 0;
+   }
+
+   @Override
+   public long getDurablePersistentSize() {
+      return 0;
    }
 
    public void setMessageCount(long messageCount) {
@@ -429,9 +537,21 @@ public class FakeQueue extends CriticalComponentImpl implements Queue {
    }
 
    @Override
+   public long getScheduledSize() {
+      // no-op
+      return 0;
+   }
+
+   @Override
    public List<MessageReference> getScheduledMessages() {
       // no-op
       return null;
+   }
+
+   @Override
+   public boolean isDurableMessage() {
+      // no-op
+      return false;
    }
 
    @Override
@@ -474,13 +594,7 @@ public class FakeQueue extends CriticalComponentImpl implements Queue {
    }
 
    @Override
-   public boolean moveReference(final long messageID, final SimpleString toAddress) throws Exception {
-      // no-op
-      return false;
-   }
-
-   @Override
-   public int moveReferences(final Filter filter, final SimpleString toAddress) throws Exception {
+   public int moveReferences(final Filter filter, final SimpleString toAddress, Binding binding) throws Exception {
       // no-op
       return 0;
    }
@@ -498,7 +612,7 @@ public class FakeQueue extends CriticalComponentImpl implements Queue {
    }
 
    @Override
-   public void referenceHandled() {
+   public void referenceHandled(MessageReference ref) {
       // no-op
 
    }
@@ -589,7 +703,7 @@ public class FakeQueue extends CriticalComponentImpl implements Queue {
    }
 
    @Override
-   public boolean moveReference(long messageID, SimpleString toAddress, boolean rejectDuplicates) throws Exception {
+   public boolean moveReference(long messageID, SimpleString toAddress, Binding binding, boolean rejectDuplicates) throws Exception {
       // no-op
       return false;
    }
@@ -600,7 +714,7 @@ public class FakeQueue extends CriticalComponentImpl implements Queue {
    }
 
    @Override
-   public int deleteMatchingReferences(int flushLImit, Filter filter) throws Exception {
+   public int deleteMatchingReferences(int flushLImit, Filter filter, AckReason reason) throws Exception {
       return 0;
    }
 
@@ -608,7 +722,8 @@ public class FakeQueue extends CriticalComponentImpl implements Queue {
    public int moveReferences(int flushLimit,
                              Filter filter,
                              SimpleString toAddress,
-                             boolean rejectDuplicates) throws Exception {
+                             boolean rejectDuplicates,
+                             Binding binding) throws Exception {
       return 0;
    }
 
@@ -659,6 +774,33 @@ public class FakeQueue extends CriticalComponentImpl implements Queue {
    }
 
    @Override
-   public void decDelivering(int size) {
+   public void setUser(SimpleString user) {
+      // no-op
    }
+
+   @Override
+   public long getDeliveringSize() {
+      return 0;
+   }
+
+   @Override
+   public int getDurableDeliveringCount() {
+      return 0;
+   }
+
+   @Override
+   public long getDurableDeliveringSize() {
+      return 0;
+   }
+
+   @Override
+   public int getDurableScheduledCount() {
+      return 0;
+   }
+
+   @Override
+   public long getDurableScheduledSize() {
+      return 0;
+   }
+
 }

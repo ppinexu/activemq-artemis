@@ -64,6 +64,14 @@ public interface ActiveMQClientLogger extends BasicLogger {
    @Message(id = 211001, value = "session created", format = Message.Format.MESSAGE_FORMAT)
    void dumpingSessionStack(@Cause Exception e);
 
+   @LogMessage(level = Logger.Level.DEBUG)
+   @Message(id = 211002, value = "Started {0} Netty Connector version {1} to {2}:{3,number,#}", format = Message.Format.MESSAGE_FORMAT)
+   void startedNettyConnector(String connectorType, String version, String host, Integer port);
+
+   @LogMessage(level = Logger.Level.DEBUG)
+   @Message(id = 211003, value = "Started InVM Connector", format = Message.Format.MESSAGE_FORMAT)
+   void startedInVMConnector();
+
    @LogMessage(level = Logger.Level.WARN)
    @Message(id = 212000, value = "{0}", format = Message.Format.MESSAGE_FORMAT)
    void warn(String message);
@@ -396,6 +404,12 @@ public interface ActiveMQClientLogger extends BasicLogger {
    @Message(id = 212073, value = "Unable to check KQueue availability ",
            format = Message.Format.MESSAGE_FORMAT)
    void unableToCheckKQueueAvailability(@Cause Throwable e);
+
+   @LogMessage(level = Logger.Level.WARN)
+   @Message(id = 212074, value = "SendAcknowledgementHandler will not be asynchronous without setting up confirmation window size",
+      format = Message.Format.MESSAGE_FORMAT)
+   void confirmationNotSet();
+
 
    @LogMessage(level = Logger.Level.ERROR)
    @Message(id = 214000, value = "Failed to call onMessage", format = Message.Format.MESSAGE_FORMAT)

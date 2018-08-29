@@ -49,7 +49,7 @@ public final class InVMNodeManager extends NodeManager {
       LIVE, PAUSED, FAILING_BACK, NOT_STARTED
    }
 
-   public State state = NOT_STARTED;
+   public volatile State state = NOT_STARTED;
 
    public long failoverPause = 0L;
 
@@ -109,18 +109,6 @@ public final class InVMNodeManager extends NodeManager {
       liveLock.acquire();
       return new ActivateCallback() {
          @Override
-         public void preActivate() {
-         }
-
-         @Override
-         public void activated() {
-         }
-
-         @Override
-         public void deActivate() {
-         }
-
-         @Override
          public void activationComplete() {
             try {
                state = LIVE;
@@ -159,9 +147,7 @@ public final class InVMNodeManager extends NodeManager {
 
    @Override
    public void releaseBackup() {
-      if (backupLock != null) {
-         backupLock.release();
-      }
+      backupLock.release();
    }
 
    @Override

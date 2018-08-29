@@ -20,6 +20,7 @@ package org.apache.activemq.artemis.api.core;
 import java.io.InputStream;
 import java.util.Map;
 
+import io.netty.buffer.ByteBuf;
 import org.apache.activemq.artemis.core.message.LargeBodyEncoder;
 import org.apache.activemq.artemis.core.message.impl.CoreMessage;
 
@@ -35,25 +36,40 @@ public interface ICoreMessage extends Message {
    @Override
    InputStream getBodyInputStream();
 
-   /** Returns a new Buffer slicing the current Body. */
+   /**
+    * Returns a new Buffer slicing the current Body.
+    */
    ActiveMQBuffer getReadOnlyBodyBuffer();
 
-   /** Return the type of the message */
+   /**
+    * Returns a readOnlyBodyBuffer or a decompressed one if the message is compressed.
+    * or the large message buffer.
+    * @return
+    */
+   ActiveMQBuffer getDataBuffer();
+
+   /**
+    * Return the type of the message
+    */
    @Override
    byte getType();
 
-   /** the type of the message */
+   /**
+    * the type of the message
+    */
    @Override
    CoreMessage setType(byte type);
 
    /**
     * We are really interested if this is a LargeServerMessage.
+    *
     * @return
     */
    boolean isServerMessage();
 
    /**
     * The body used for this message.
+    *
     * @return
     */
    @Override
@@ -61,9 +77,17 @@ public interface ICoreMessage extends Message {
 
    int getEndOfBodyPosition();
 
-
-   /** Used on large messages treatment */
+   /**
+    * Used on large messages treatment
+    */
    void copyHeadersAndProperties(Message msg);
+
+   void sendBuffer_1X(ByteBuf sendBuffer);
+
+   /**
+    * it will fix the body of incoming messages from 1.x and before versions
+    */
+   void receiveBuffer_1X(ByteBuf buffer);
 
    /**
     * @return Returns the message in Map form, useful when encoding to JSON
@@ -82,7 +106,7 @@ public interface ICoreMessage extends Message {
       map.put("durable", isDurable());
       map.put("expiration", getExpiration());
       map.put("timestamp", getTimestamp());
-      map.put("priority", (int)getPriority());
+      map.put("priority", getPriority());
 
       return map;
    }

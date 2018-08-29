@@ -37,7 +37,7 @@ import org.apache.activemq.artemis.journal.ActiveMQJournalBundle;
 import org.apache.activemq.artemis.journal.ActiveMQJournalLogger;
 import org.apache.activemq.artemis.utils.Env;
 
-public final class NIOSequentialFile extends AbstractSequentialFile {
+public class NIOSequentialFile extends AbstractSequentialFile {
 
    private FileChannel channel;
 
@@ -112,7 +112,7 @@ public final class NIOSequentialFile extends AbstractSequentialFile {
             }
             //set the position to 0 to match the fill contract
             channel.position(0);
-            fileSize = size;
+            fileSize = channel.size();
          } finally {
             //return it to the factory
             this.factory.releaseBuffer(zeroPage);

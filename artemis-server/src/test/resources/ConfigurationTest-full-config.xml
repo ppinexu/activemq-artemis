@@ -71,11 +71,20 @@
       </remoting-outgoing-interceptors>
       <persist-delivery-count-before-delivery>true</persist-delivery-count-before-delivery>
       <connectors>
-         <connector name="connector1">tcp://localhost1:5678?localAddress=mylocal;localPort=99</connector>
+         <connector name="connector1">
+            tcp://localhost1:5678?
+            localAddress=mylocal;
+            localPort=99
+         </connector>
          <connector name="connector2">vm://5</connector>
       </connectors>
       <acceptors>
-         <acceptor>tcp://0.0.0.0:61616?tcpNoDelay=456;connectionTtl=44;connectionsAllowed=92</acceptor>
+         <acceptor>
+            tcp://0.0.0.0:61616?
+            tcpNoDelay=456;
+            connectionTtl=44;
+            connectionsAllowed=92
+         </acceptor>
          <acceptor>vm://0?e1=z1;e2=567;connectionsAllowed=87</acceptor>
       </acceptors>
       <broadcast-groups>
@@ -125,6 +134,18 @@
             <transformer-class-name>org.foo.Transformer2</transformer-class-name>
             <exclusive>false</exclusive>
          </divert>
+         <divert name="divert3">
+            <routing-name>routing-name2</routing-name>
+            <address>address2</address>
+            <forwarding-address>forwarding-address2</forwarding-address>
+            <filter string="speed &lt; 88"/>
+            <transformer>
+               <class-name>org.foo.DivertTransformer3</class-name>
+               <property key="divertTransformerKey1" value="divertTransformerValue1"/>
+               <property key="divertTransformerKey2" value="divertTransformerValue2"/>
+            </transformer>
+            <exclusive>false</exclusive>
+         </divert>
       </diverts>
       <amqp-use-core-subscription-naming>true</amqp-use-core-subscription-naming>
       <queues>
@@ -163,6 +184,17 @@
          <bridge name="bridge2">
             <queue-name>queue2</queue-name>
             <forwarding-address>bridge-forwarding-address2</forwarding-address>
+            <producer-window-size>555k</producer-window-size>
+            <discovery-group-ref discovery-group-name="dg1"/>
+         </bridge>
+         <bridge name="bridge3">
+            <queue-name>queue3</queue-name>
+            <forwarding-address>bridge-forwarding-address2</forwarding-address>
+            <transformer>
+               <class-name>org.foo.BridgeTransformer3</class-name>
+               <property key="bridgeTransformerKey1" value="bridgeTransformerValue1"/>
+               <property key="bridgeTransformerKey2" value="bridgeTransformerValue2"/>
+            </transformer>
             <producer-window-size>555k</producer-window-size>
             <discovery-group-ref discovery-group-name="dg1"/>
          </bridge>
@@ -305,6 +337,7 @@
             <default-max-consumers>15</default-max-consumers>
             <default-queue-routing-type>MULTICAST</default-queue-routing-type>
             <default-address-routing-type>ANYCAST</default-address-routing-type>
+            <default-consumer-window-size>10000</default-consumer-window-size>
          </address-setting>
       </address-settings>
       <resource-limit-settings>

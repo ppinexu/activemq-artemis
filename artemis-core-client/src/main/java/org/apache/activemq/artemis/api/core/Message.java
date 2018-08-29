@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.Set;
 
 import io.netty.buffer.ByteBuf;
+import org.apache.activemq.artemis.core.message.impl.CoreMessageObjectPools;
 import org.apache.activemq.artemis.core.persistence.Persister;
 
 /**
@@ -93,7 +94,7 @@ public interface Message {
    SimpleString HDR_ACTUAL_EXPIRY_TIME = new SimpleString("_AMQ_ACTUAL_EXPIRY");
 
    /**
-    * The original address of a message when a message is transferred through DLQ or expiry
+    * The original address of a message when a message is diverted or transferred through DLQ or expiry
     */
    SimpleString HDR_ORIGINAL_ADDRESS = new SimpleString("_AMQ_ORIG_ADDRESS");
 
@@ -103,7 +104,7 @@ public interface Message {
    SimpleString HDR_ORIGINAL_QUEUE = new SimpleString("_AMQ_ORIG_QUEUE");
 
    /**
-    * The original message ID before th emessage was transferred.
+    * The original message ID before the message was transferred.
     */
    SimpleString HDR_ORIG_MESSAGE_ID = new SimpleString("_AMQ_ORIG_MESSAGE_ID");
 
@@ -152,6 +153,12 @@ public interface Message {
     */
    SimpleString HDR_ROUTING_TYPE = new SimpleString("_AMQ_ROUTING_TYPE");
 
+   /**
+    * The prefix used (if any) when sending this message.  For protocols (e.g. STOMP) that need to track this and restore
+    * the prefix when the message is consumed.
+    */
+   SimpleString HDR_PREFIX = new SimpleString("_AMQ_PREFIX");
+
    byte DEFAULT_TYPE = 0;
 
    byte OBJECT_TYPE = 2;
@@ -181,6 +188,10 @@ public interface Message {
 
    default SimpleString getLastValueProperty() {
       return null;
+   }
+
+   default Message setLastValueProperty(SimpleString lastValueName) {
+      return this;
    }
 
    /**
@@ -344,10 +355,28 @@ public interface Message {
 
    String getAddress();
 
+   /**
+    * Look at {@link #setAddress(SimpleString)} for the doc.
+    * @param address
+    * @return
+    */
    Message setAddress(String address);
 
    SimpleString getAddressSimpleString();
 
+   /**
+    * This will set the address on CoreMessage.
+    *
+    * Note for AMQPMessages:
+    * in AMQPMessages this will not really change the address on the message. Instead it will add a property
+    * on extraProperties which only transverse internally at the broker.
+    * Whatever you change here it won't affect anything towards the received message.
+    *
+    * If you wish to change AMQPMessages address you will have to do it directly at the AMQP Message, however beware
+    * that AMQPMessages are not supposed to be changed at the broker, so only do it if you know what you are doing.
+    * @param address
+    * @return
+    */
    Message setAddress(SimpleString address);
 
    long getTimestamp();
@@ -583,6 +612,8 @@ public interface Message {
 
    Message putStringProperty(SimpleString key, SimpleString value);
 
+   Message putStringProperty(SimpleString key, String value);
+
    /**
     * Returns the size of the <em>encoded</em> message.
     */
@@ -631,7 +662,12 @@ public interface Message {
    default Map<String, Object> toPropertyMap() {
       Map map = new HashMap<>();
       for (SimpleString name : getPropertyNames()) {
-         map.put(name.toString(), getObjectProperty(name.toString()));
+         Object value = getObjectProperty(name.toString());
+         //some property is SimpleString, which is not available for management console
+         if (value instanceof SimpleString) {
+            value = value.toString();
+         }
+         map.put(name.toString(), value);
       }
       return map;
    }
@@ -640,8 +676,20 @@ public interface Message {
    /** This should make you convert your message into Core format. */
    ICoreMessage toCore();
 
+   /** This should make you convert your message into Core format. */
+   ICoreMessage toCore(CoreMessageObjectPools coreMessageObjectPools);
+
    int getMemoryEstimate();
 
-
+   /**
+    * This is the size of the message when persisted on disk which is used for metrics tracking
+    * Note that even if the message itself is not persisted on disk (ie non-durable) this value is
+    * still used for metrics tracking
+    * If a normal message it will be the encoded message size
+    * If a large message it will be encoded message size + large message body size
+    * @return
+    * @throws ActiveMQException
+    */
+   long getPersistentSize() throws ActiveMQException;
 
 }

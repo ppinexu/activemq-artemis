@@ -36,6 +36,7 @@ import org.apache.activemq.artemis.core.postoffice.BindingsFactory;
 import org.apache.activemq.artemis.core.postoffice.QueueBinding;
 import org.apache.activemq.artemis.core.server.ActiveMQMessageBundle;
 import org.apache.activemq.artemis.api.core.RoutingType;
+import org.apache.activemq.artemis.core.server.cluster.impl.MessageLoadBalancingType;
 import org.apache.activemq.artemis.core.server.impl.AddressInfo;
 import org.apache.activemq.artemis.core.transaction.Transaction;
 import org.apache.activemq.artemis.utils.CompositeAddress;
@@ -55,7 +56,7 @@ public class SimpleAddressManager implements AddressManager {
    /**
     * HashMap<Address, Binding>
     */
-   private final ConcurrentMap<SimpleString, Bindings> mappings = new ConcurrentHashMap<>();
+   protected final ConcurrentMap<SimpleString, Bindings> mappings = new ConcurrentHashMap<>();
 
    /**
     * HashMap<QueueName, Binding>
@@ -129,6 +130,19 @@ public class SimpleAddressManager implements AddressManager {
          Address addCheck = new AddressImpl(binding.getAddress(), wildcardConfiguration);
 
          if (addCheck.matches(add)) {
+            bindings.addBinding(binding);
+         }
+      }
+
+      return bindings;
+   }
+
+   @Override
+   public Bindings getDirectBindings(final SimpleString address) throws Exception {
+      Bindings bindings = bindingsFactory.createBindings(address);
+
+      for (Binding binding : nameMap.values()) {
+         if (binding.getAddress().equals(address)) {
             bindings.addBinding(binding);
          }
       }
@@ -258,7 +272,7 @@ public class SimpleAddressManager implements AddressManager {
 
    @Override
    public AddressInfo updateAddressInfo(SimpleString addressName,
-                                        Collection<RoutingType> routingTypes) throws Exception {
+                                        EnumSet<RoutingType> routingTypes) throws Exception {
 
       AddressInfo info = addressInfoMap.get(addressName);
 
@@ -272,7 +286,7 @@ public class SimpleAddressManager implements AddressManager {
       }
 
       validateRoutingTypes(addressName, routingTypes);
-      final Set<RoutingType> updatedRoutingTypes = EnumSet.copyOf(routingTypes);
+      final EnumSet<RoutingType> updatedRoutingTypes = EnumSet.copyOf(routingTypes);
       info.setRoutingTypes(updatedRoutingTypes);
 
 
@@ -294,7 +308,7 @@ public class SimpleAddressManager implements AddressManager {
       return info;
    }
 
-   private boolean isEquals(Collection<RoutingType> set1, Collection<RoutingType> set2) {
+   private boolean isEquals(Collection<RoutingType> set1, EnumSet<RoutingType> set2) {
       Set<RoutingType> eset1 = set1 == null || set1.isEmpty() ? Collections.emptySet() : EnumSet.copyOf(set1);
       Set<RoutingType> eset2 = set2 == null || set2.isEmpty() ? Collections.emptySet() : EnumSet.copyOf(set2);
 
@@ -309,7 +323,7 @@ public class SimpleAddressManager implements AddressManager {
       return eset2.containsAll(eset1);
    }
 
-   private void validateRoutingTypes(SimpleString addressName, Collection<RoutingType> routingTypes) {
+   private void validateRoutingTypes(SimpleString addressName, EnumSet<RoutingType> routingTypes) {
       final Bindings bindings = this.mappings.get(addressName);
       if (bindings != null) {
          for (Binding binding : bindings.getBindings()) {
@@ -325,12 +339,17 @@ public class SimpleAddressManager implements AddressManager {
    }
 
    @Override
-   public AddressInfo removeAddressInfo(SimpleString address) {
+   public AddressInfo removeAddressInfo(SimpleString address) throws Exception {
       return addressInfoMap.remove(address);
    }
 
    @Override
    public AddressInfo getAddressInfo(SimpleString addressName) {
       return addressInfoMap.get(addressName);
+   }
+
+   @Override
+   public void updateMessageLoadBalancingTypeForAddress(SimpleString  address, MessageLoadBalancingType messageLoadBalancingType) throws Exception {
+      getBindingsForRoutingAddress(address).setMessageLoadBalancingType(messageLoadBalancingType);
    }
 }

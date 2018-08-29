@@ -43,9 +43,6 @@ public class BasicOpenWireTest extends OpenWireTestBase {
 
    @Rule
    public TestName name = new TestName();
-
-   protected static final String urlString = "tcp://" + OWHOST + ":" + OWPORT + "?wireFormat.cacheEnabled=true";
-   protected static final String urlStringLoose = "tcp://" + OWHOST + ":" + OWPORT + "?wireFormat.tightEncodingEnabled=false";
    protected ActiveMQConnectionFactory factory;
    protected ActiveMQConnectionFactory looseFactory;
    protected ActiveMQXAConnectionFactory xaFactory;
@@ -69,11 +66,11 @@ public class BasicOpenWireTest extends OpenWireTestBase {
       System.setProperty("org.apache.activemq.transport.AbstractInactivityMonitor.keepAliveTime", "5");
       createFactories();
       SimpleString coreQueue = new SimpleString(queueName);
-      this.server.createQueue(coreQueue, RoutingType.ANYCAST, coreQueue, null, false, false, -1, false, true);
+      this.server.createQueue(coreQueue, RoutingType.ANYCAST, coreQueue, null, true, false, -1, false, true);
       testQueues.put(queueName, coreQueue);
 
       SimpleString coreQueue2 = new SimpleString(queueName2);
-      this.server.createQueue(coreQueue2, RoutingType.ANYCAST, coreQueue2, null, false, false, -1, false, true);
+      this.server.createQueue(coreQueue2, RoutingType.ANYCAST, coreQueue2, null, true, false, -1, false, true);
       testQueues.put(queueName2, coreQueue2);
 
       SimpleString durableQueue = new SimpleString(durableQueueName);
@@ -154,7 +151,7 @@ public class BasicOpenWireTest extends OpenWireTestBase {
       SimpleString coreQ = testQueues.get(qname);
       if (coreQ == null) {
          coreQ = new SimpleString(qname);
-         this.server.createQueue(coreQ, RoutingType.ANYCAST, coreQ, null, false, false, -1, false, true);
+         this.server.createQueue(coreQ, RoutingType.ANYCAST, coreQ, null, true, false, -1, false, true);
          testQueues.put(qname, coreQ);
       }
    }

@@ -103,7 +103,7 @@ public final class SharedStoreBackupActivation extends Activation {
                         activeMQServer.start();
                      }
                   } catch (Exception e) {
-                     ActiveMQServerLogger.LOGGER.serverRestartWarning();
+                     ActiveMQServerLogger.LOGGER.serverRestartWarning(e);
                   }
                }
             });
@@ -215,8 +215,11 @@ public final class SharedStoreBackupActivation extends Activation {
 
                            // ensure that the server to which we are failing back actually starts fully before we restart
                            nodeManager.start();
-                           nodeManager.awaitLiveStatus();
-                           nodeManager.stop();
+                           try {
+                              nodeManager.awaitLiveStatus();
+                           } finally {
+                              nodeManager.stop();
+                           }
 
                            synchronized (failbackCheckerGuard) {
                               if (cancelFailBackChecker || !sharedStoreSlavePolicy.isRestartBackup())
@@ -227,8 +230,7 @@ public final class SharedStoreBackupActivation extends Activation {
                               activeMQServer.start();
                            }
                         } catch (Exception e) {
-                           ActiveMQServerLogger.LOGGER.warn(e.getMessage(), e);
-                           ActiveMQServerLogger.LOGGER.serverRestartWarning();
+                           ActiveMQServerLogger.LOGGER.serverRestartWarning(e);
                         }
                      }
                   });

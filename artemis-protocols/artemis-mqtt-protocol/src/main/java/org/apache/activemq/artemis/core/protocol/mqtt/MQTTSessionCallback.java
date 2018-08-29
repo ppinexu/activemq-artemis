@@ -64,7 +64,6 @@ public class MQTTSessionCallback implements SessionCallback {
                                            byte[] body,
                                            boolean continues,
                                            boolean requiresResponse) {
-      log.warn("Sending LARGE MESSAGE");
       return 1;
    }
 
@@ -78,7 +77,7 @@ public class MQTTSessionCallback implements SessionCallback {
    }
 
    @Override
-   public void disconnect(ServerConsumer consumer, String queueName) {
+   public void disconnect(ServerConsumer consumer, SimpleString queueName) {
       try {
          consumer.removeItself();
       } catch (Exception e) {

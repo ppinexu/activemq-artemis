@@ -16,7 +16,7 @@
  */
 package org.apache.activemq.artemis.tests.unit.core.server.impl.fakes;
 
-import java.util.Collection;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -36,6 +36,7 @@ import org.apache.activemq.artemis.core.server.MessageReference;
 import org.apache.activemq.artemis.core.server.Queue;
 import org.apache.activemq.artemis.core.server.RoutingContext;
 import org.apache.activemq.artemis.api.core.RoutingType;
+import org.apache.activemq.artemis.core.server.cluster.impl.MessageLoadBalancingType;
 import org.apache.activemq.artemis.core.server.impl.AddressInfo;
 import org.apache.activemq.artemis.core.server.impl.MessageReferenceImpl;
 import org.apache.activemq.artemis.core.transaction.Transaction;
@@ -46,13 +47,17 @@ public class FakePostOffice implements PostOffice {
    public QueueBinding updateQueue(SimpleString name,
                                    RoutingType routingType,
                                    Integer maxConsumers,
-                                   Boolean purgeOnNoConsumers) throws Exception {
+                                   Boolean purgeOnNoConsumers,
+                                   Boolean exclusive,
+                                   Integer consumersBeforeDispatch,
+                                   Long delayBeforeDispatch,
+                                   SimpleString user) throws Exception {
       return null;
    }
 
    @Override
    public AddressInfo updateAddressInfo(SimpleString addressName,
-                                        Collection<RoutingType> routingTypes) throws Exception {
+                                        EnumSet<RoutingType> routingTypes) throws Exception {
       return null;
    }
 
@@ -65,6 +70,11 @@ public class FakePostOffice implements PostOffice {
    @Override
    public Set<SimpleString> getAddresses() {
       return null;
+   }
+
+   @Override
+   public void updateMessageLoadBalancingTypeForAddress(SimpleString  address, MessageLoadBalancingType messageLoadBalancingType) throws Exception {
+
    }
 
    @Override
@@ -86,6 +96,11 @@ public class FakePostOffice implements PostOffice {
    @Override
    public void stop() throws Exception {
 
+   }
+
+   @Override
+   public AddressInfo removeAddressInfo(SimpleString address, boolean force) throws Exception {
+      return null;
    }
 
    @Override
@@ -148,6 +163,12 @@ public class FakePostOffice implements PostOffice {
    }
 
    @Override
+   public Bindings getDirectBindings(final SimpleString address) {
+
+      return null;
+   }
+
+   @Override
    public Object getNotificationLock() {
 
       return null;
@@ -203,15 +224,17 @@ public class FakePostOffice implements PostOffice {
    }
 
    @Override
+   public RoutingStatus route(Message message, Transaction tx, boolean direct, boolean rejectDuplicates, Binding binding) throws Exception {
+      return null;
+   }
+
+   @Override
    public RoutingStatus route(Message message, RoutingContext context, boolean direct) throws Exception {
       return null;
    }
 
    @Override
-   public RoutingStatus route(Message message,
-                              RoutingContext context,
-                              boolean direct,
-                              boolean rejectDuplicates) throws Exception {
+   public RoutingStatus route(Message message, RoutingContext context, boolean direct, boolean rejectDuplicates, Binding binding) throws Exception {
       return null;
    }
 

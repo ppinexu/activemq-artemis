@@ -68,7 +68,7 @@ public class CoreProtocolManager implements ProtocolManager<Interceptor> {
 
    private static final List<String> websocketRegistryNames = Collections.EMPTY_LIST;
 
-   private final ActiveMQServer server;
+   protected final ActiveMQServer server;
 
    private final List<Interceptor> incomingInterceptors;
 
@@ -116,7 +116,7 @@ public class CoreProtocolManager implements ProtocolManager<Interceptor> {
 
       Executor connectionExecutor = server.getExecutorFactory().getExecutor();
 
-      final CoreRemotingConnection rc = new RemotingConnectionImpl(ServerPacketDecoder.INSTANCE, connection, incomingInterceptors, outgoingInterceptors, config.isAsyncConnectionExecutionEnabled() ? connectionExecutor : null, server.getNodeID());
+      final CoreRemotingConnection rc = new RemotingConnectionImpl(new ServerPacketDecoder(), connection, incomingInterceptors, outgoingInterceptors, config.isAsyncConnectionExecutionEnabled() ? connectionExecutor : null, server.getNodeID());
 
       Channel channel1 = rc.getChannel(CHANNEL_ID.SESSION.id, -1);
 
@@ -253,14 +253,14 @@ public class CoreProtocolManager implements ProtocolManager<Interceptor> {
             SubscribeClusterTopologyUpdatesMessage msg = (SubscribeClusterTopologyUpdatesMessage) packet;
 
             if (packet.getType() == PacketImpl.SUBSCRIBE_TOPOLOGY_V2) {
-               channel0.getConnection().setClientVersion(((SubscribeClusterTopologyUpdatesMessageV2) msg).getClientVersion());
+               channel0.getConnection().setChannelVersion(((SubscribeClusterTopologyUpdatesMessageV2) msg).getClientVersion());
             }
 
             final ClusterTopologyListener listener = new ClusterTopologyListener() {
                @Override
                public void nodeUP(final TopologyMember topologyMember, final boolean last) {
                   try {
-                     final Pair<TransportConfiguration, TransportConfiguration> connectorPair = BackwardsCompatibilityUtils.getTCPair(channel0.getConnection().getClientVersion(), topologyMember);
+                     final Pair<TransportConfiguration, TransportConfiguration> connectorPair = BackwardsCompatibilityUtils.checkTCPPairConversion(channel0.getConnection().getChannelVersion(), topologyMember);
 
                      final String nodeID = topologyMember.getNodeId();
                      // Using an executor as most of the notifications on the Topology

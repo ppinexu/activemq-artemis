@@ -64,7 +64,7 @@ public class RemotingConnectionImpl extends AbstractRemotingConnection implement
 
    private final boolean client;
 
-   private int clientVersion;
+   private int channelVersion;
 
    private volatile SimpleIDGenerator idGenerator = new SimpleIDGenerator(CHANNEL_ID.USER.id);
 
@@ -76,7 +76,10 @@ public class RemotingConnectionImpl extends AbstractRemotingConnection implement
 
    private final SimpleString nodeID;
 
-   private String clientID;
+   @Override
+   public void scheduledFlush() {
+      flush();
+   }
 
    // Constructors
    // ---------------------------------------------------------------------------------
@@ -131,6 +134,10 @@ public class RemotingConnectionImpl extends AbstractRemotingConnection implement
       this.nodeID = nodeID;
 
       transportConnection.setProtocolConnection(this);
+
+      if (logger.isTraceEnabled()) {
+         logger.trace("RemotingConnectionImpl created: " + this);
+      }
    }
 
    // RemotingConnection implementation
@@ -138,28 +145,23 @@ public class RemotingConnectionImpl extends AbstractRemotingConnection implement
 
    @Override
    public String toString() {
-      return "RemotingConnectionImpl [clientID=" + clientID +
-         ", nodeID=" +
-         nodeID +
-         ", transportConnection=" +
-         getTransportConnection() +
-         "]";
+      return "RemotingConnectionImpl [ID=" + getID() + ", clientID=" + getClientID() + ", nodeID=" + nodeID + ", transportConnection=" + getTransportConnection() + "]";
    }
 
    /**
-    * @return the clientVersion
+    * @return the channelVersion
     */
    @Override
-   public int getClientVersion() {
-      return clientVersion;
+   public int getChannelVersion() {
+      return channelVersion;
    }
 
    /**
-    * @param clientVersion the clientVersion to set
+    * @param clientVersion the channelVersion to set
     */
    @Override
-   public void setClientVersion(int clientVersion) {
-      this.clientVersion = clientVersion;
+   public void setChannelVersion(int clientVersion) {
+      this.channelVersion = clientVersion;
    }
 
    @Override
@@ -363,10 +365,10 @@ public class RemotingConnectionImpl extends AbstractRemotingConnection implement
    @Override
    public void bufferReceived(final Object connectionID, final ActiveMQBuffer buffer) {
       try {
-         final Packet packet = packetDecoder.decode(buffer);
+         final Packet packet = packetDecoder.decode(buffer, this);
 
          if (logger.isTraceEnabled()) {
-            logger.trace("handling packet " + packet);
+            logger.trace("RemotingConnectionID=" + getID() + " handling packet " + packet);
          }
 
          dataReceived = true;
@@ -378,6 +380,11 @@ public class RemotingConnectionImpl extends AbstractRemotingConnection implement
          ActiveMQClientLogger.LOGGER.errorDecodingPacket(e);
          throw new IllegalStateException(e);
       }
+   }
+
+   @Override
+   public String getTransportLocalAddress() {
+      return getTransportConnection().getLocalAddress();
    }
 
    private void doBufferReceived(final Packet packet) {
@@ -413,7 +420,7 @@ public class RemotingConnectionImpl extends AbstractRemotingConnection implement
 
    @Override
    public void killMessage(SimpleString nodeID) {
-      if (clientVersion < DisconnectConsumerWithKillMessage.VERSION_INTRODUCED) {
+      if (channelVersion < DisconnectConsumerWithKillMessage.VERSION_INTRODUCED) {
          return;
       }
       Channel clientChannel = getChannel(1, -1);

@@ -342,7 +342,7 @@ public class SessionTest extends ActiveMQTestBase {
       Queue q = (Queue) server.getPostOffice().getBinding(new SimpleString(queueName)).getBindable();
       Assert.assertEquals(0, getMessageCount(q));
       clientSession.commit();
-      Assert.assertEquals(10, getMessageCount(q));
+      Assert.assertTrue(Wait.waitFor(() -> getMessageCount(q) == 10, 2000, 100));
       clientSession.close();
    }
 
@@ -483,8 +483,7 @@ public class SessionTest extends ActiveMQTestBase {
       Assert.assertNotNull(m);
       m.acknowledge();
       clientSession.rollback();
-      Wait.waitFor(() -> getMessageCount(q) == 10);
-      Assert.assertEquals(10, getMessageCount(q));
+      Wait.assertEquals(10, () -> getMessageCount(q));
       clientSession.close();
       sendSession.close();
    }

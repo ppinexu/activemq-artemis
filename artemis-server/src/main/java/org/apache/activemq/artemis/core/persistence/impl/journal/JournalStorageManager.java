@@ -71,19 +71,19 @@ public class JournalStorageManager extends AbstractJournalStorageManager {
 
    private static final Logger logger = Logger.getLogger(JournalStorageManager.class);
 
-   private SequentialFileFactory journalFF;
+   protected SequentialFileFactory journalFF;
 
-   private SequentialFileFactory bindingsFF;
+   protected SequentialFileFactory bindingsFF;
 
    SequentialFileFactory largeMessagesFactory;
 
-   private Journal originalMessageJournal;
+   protected Journal originalMessageJournal;
 
-   private Journal originalBindingsJournal;
+   protected Journal originalBindingsJournal;
 
    protected String largeMessagesDirectory;
 
-   private ReplicationManager replicator;
+   protected ReplicationManager replicator;
 
    public JournalStorageManager(final Configuration config,
                                 final CriticalAnalyzer analyzer,
@@ -115,6 +115,11 @@ public class JournalStorageManager extends AbstractJournalStorageManager {
    }
 
    @Override
+   public SequentialFileFactory getJournalSequentialFileFactory() {
+      return journalFF;
+   }
+
+   @Override
    protected void init(Configuration config, IOCriticalErrorListener criticalErrorListener) {
 
       if (!EnumSet.allOf(JournalType.class).contains(config.getJournalType())) {
@@ -124,7 +129,7 @@ public class JournalStorageManager extends AbstractJournalStorageManager {
       bindingsFF = new NIOSequentialFileFactory(config.getBindingsLocation(), criticalErrorListener, config.getJournalMaxIO_NIO());
       bindingsFF.setDatasync(config.isJournalDatasync());
 
-      Journal localBindings = new JournalImpl(ioExecutors, 1024 * 1024, 2, config.getJournalCompactMinFiles(), config.getJournalPoolFiles(), config.getJournalCompactPercentage(), config.getJournalFileOpenTimeout(), bindingsFF, "activemq-bindings", "bindings", 1, 0);
+      Journal localBindings = new JournalImpl(ioExecutorFactory, 1024 * 1024, 2, config.getJournalPoolFiles(), config.getJournalCompactMinFiles(), config.getJournalCompactPercentage(), config.getJournalFileOpenTimeout(), bindingsFF, "activemq-bindings", "bindings", 1, 0, criticalErrorListener);
 
       bindingsJournal = localBindings;
       originalBindingsJournal = localBindings;
@@ -132,16 +137,22 @@ public class JournalStorageManager extends AbstractJournalStorageManager {
       switch (config.getJournalType()) {
 
          case NIO:
-            ActiveMQServerLogger.LOGGER.journalUseNIO();
-            journalFF = new NIOSequentialFileFactory(config.getJournalLocation(), true, config.getJournalBufferSize_NIO(), config.getJournalBufferTimeout_NIO(), config.getJournalMaxIO_NIO(), config.isLogJournalWriteRate(), criticalErrorListener);
+            if (criticalErrorListener != null) {
+               ActiveMQServerLogger.LOGGER.journalUseNIO();
+            }
+            journalFF = new NIOSequentialFileFactory(config.getJournalLocation(), true, config.getJournalBufferSize_NIO(), config.getJournalBufferTimeout_NIO(), config.getJournalMaxIO_NIO(), config.isLogJournalWriteRate(), criticalErrorListener, getCriticalAnalyzer());
             break;
          case ASYNCIO:
-            ActiveMQServerLogger.LOGGER.journalUseAIO();
-            journalFF = new AIOSequentialFileFactory(config.getJournalLocation(), config.getJournalBufferSize_AIO(), config.getJournalBufferTimeout_AIO(), config.getJournalMaxIO_AIO(), config.isLogJournalWriteRate(), criticalErrorListener);
+            if (criticalErrorListener != null) {
+               ActiveMQServerLogger.LOGGER.journalUseAIO();
+            }
+            journalFF = new AIOSequentialFileFactory(config.getJournalLocation(), config.getJournalBufferSize_AIO(), config.getJournalBufferTimeout_AIO(), config.getJournalMaxIO_AIO(), config.isLogJournalWriteRate(), criticalErrorListener, getCriticalAnalyzer());
             break;
          case MAPPED:
-            ActiveMQServerLogger.LOGGER.journalUseMAPPED();
-            journalFF = MappedSequentialFileFactory.buffered(config.getJournalLocation(), config.getJournalFileSize(), config.getJournalBufferSize_NIO(), config.getJournalBufferTimeout_NIO(), criticalErrorListener);
+            if (criticalErrorListener != null) {
+               ActiveMQServerLogger.LOGGER.journalUseMAPPED();
+            }
+            journalFF = new MappedSequentialFileFactory(config.getJournalLocation(), config.getJournalFileSize(), true, config.getJournalBufferSize_NIO(), config.getJournalBufferTimeout_NIO(), criticalErrorListener);
             break;
          default:
             throw ActiveMQMessageBundle.BUNDLE.invalidJournalType2(config.getJournalType());
@@ -160,7 +171,7 @@ public class JournalStorageManager extends AbstractJournalStorageManager {
          fileSize = difference < journalFF.getAlignment() / 2 ? low : high;
          ActiveMQServerLogger.LOGGER.invalidJournalFileSize(config.getJournalFileSize(), fileSize, journalFF.getAlignment());
       }
-      Journal localMessage = new JournalImpl(ioExecutors, fileSize, config.getJournalMinFiles(), config.getJournalPoolFiles(), config.getJournalCompactMinFiles(), config.getJournalCompactPercentage(), journalFF, "activemq-data", "amq", journalFF.getMaxIO(), 0);
+      Journal localMessage = createMessageJournal(config, criticalErrorListener, fileSize);
 
       messageJournal = localMessage;
       originalMessageJournal = localMessage;
@@ -174,6 +185,12 @@ public class JournalStorageManager extends AbstractJournalStorageManager {
       } else {
          pageMaxConcurrentIO = null;
       }
+   }
+
+   protected Journal createMessageJournal(Configuration config,
+                                        IOCriticalErrorListener criticalErrorListener,
+                                        int fileSize) {
+      return new JournalImpl(ioExecutorFactory, fileSize, config.getJournalMinFiles(), config.getJournalPoolFiles(), config.getJournalCompactMinFiles(), config.getJournalCompactPercentage(), config.getJournalFileOpenTimeout(), journalFF, "activemq-data", "amq", journalFF.getMaxIO(), 0, criticalErrorListener);
    }
 
    // Life Cycle Handlers
@@ -212,9 +229,21 @@ public class JournalStorageManager extends AbstractJournalStorageManager {
    }
 
    @Override
-   public synchronized void stop(boolean ioCriticalError, boolean sendFailover) throws Exception {
+   public void stop(boolean ioCriticalError, boolean sendFailover) throws Exception {
+      try {
+         enterCritical(CRITICAL_STOP);
+         synchronized (this) {
+            if (internalStop(ioCriticalError, sendFailover))
+               return;
+         }
+      } finally {
+         leaveCritical(CRITICAL_STOP);
+      }
+   }
+
+   private boolean internalStop(boolean ioCriticalError, boolean sendFailover) throws Exception {
       if (!started) {
-         return;
+         return true;
       }
 
       if (!ioCriticalError) {
@@ -238,30 +267,41 @@ public class JournalStorageManager extends AbstractJournalStorageManager {
          // that's ok
       }
 
-      // We cache the variable as the replicator could be changed between here and the time we call stop
-      // since sendLiveIsStopping may issue a close back from the channel
-      // and we want to ensure a stop here just in case
-      ReplicationManager replicatorInUse = replicator;
-      if (replicatorInUse != null) {
-         if (sendFailover) {
-            final OperationContext token = replicator.sendLiveIsStopping(ReplicationLiveIsStoppingMessage.LiveStopping.FAIL_OVER);
-            if (token != null) {
-               try {
-                  token.waitCompletion(5000);
-               } catch (Exception e) {
-                  // ignore it
+      enterCritical(CRITICAL_STOP_2);
+      storageManagerLock.writeLock().lock();
+      try {
+
+         // We cache the variable as the replicator could be changed between here and the time we call stop
+         // since sendLiveIsStopping may issue a close back from the channel
+         // and we want to ensure a stop here just in case
+         ReplicationManager replicatorInUse = replicator;
+         if (replicatorInUse != null) {
+            if (sendFailover) {
+               final OperationContext token = replicator.sendLiveIsStopping(ReplicationLiveIsStoppingMessage.LiveStopping.FAIL_OVER);
+               if (token != null) {
+                  try {
+                     token.waitCompletion(5000);
+                  } catch (Exception e) {
+                     // ignore it
+                  }
                }
             }
+            // we cannot clear replication tokens, otherwise clients will eventually be informed of completion during a server's shutdown
+            // while the backup will never receive then
+            replicatorInUse.stop(false);
          }
-         replicatorInUse.stop();
+         bindingsJournal.stop();
+
+         messageJournal.stop();
+
+         journalLoaded = false;
+
+         started = false;
+      } finally {
+         storageManagerLock.writeLock().unlock();
+         leaveCritical(CRITICAL_STOP_2);
       }
-      bindingsJournal.stop();
-
-      messageJournal.stop();
-
-      journalLoaded = false;
-
-      started = false;
+      return false;
    }
 
    /**
@@ -557,6 +597,14 @@ public class JournalStorageManager extends AbstractJournalStorageManager {
                throw new ActiveMQIllegalStateException("already replicating");
             replicator = replicationManager;
 
+            if (!((JournalImpl) originalMessageJournal).flushAppendExecutor(10, TimeUnit.SECONDS)) {
+               throw new Exception("Live message journal is busy");
+            }
+
+            if (!((JournalImpl) originalBindingsJournal).flushAppendExecutor(10, TimeUnit.SECONDS)) {
+               throw new Exception("Live bindings journal is busy");
+            }
+
             // Establishes lock
             originalMessageJournal.synchronizationLock();
             originalBindingsJournal.synchronizationLock();
@@ -604,7 +652,7 @@ public class JournalStorageManager extends AbstractJournalStorageManager {
             storageManagerLock.writeLock().unlock();
          }
       } catch (Exception e) {
-         logger.warn(e.getMessage(), e);
+         ActiveMQServerLogger.LOGGER.unableToStartReplication(e);
          stopReplication();
          throw e;
       } finally {

@@ -94,7 +94,7 @@ public class ScaleDownHandler {
       ClusterControl clusterControl = clusterController.connectToNodeInCluster((ClientSessionFactoryInternal) sessionFactory);
       clusterControl.authorize();
       long num = scaleDownMessages(sessionFactory, targetNodeId, clusterControl.getClusterUser(), clusterControl.getClusterPassword());
-      ActiveMQServerLogger.LOGGER.info("Scaled down " + num + " messages total.");
+      ActiveMQServerLogger.LOGGER.infoScaledDownMessages(num);
       scaleDownTransactions(sessionFactory, resourceManager, clusterControl.getClusterUser(), clusterControl.getClusterPassword());
       scaleDownDuplicateIDs(duplicateIDMap, sessionFactory, managementAddress, clusterControl.getClusterUser(), clusterControl.getClusterPassword());
       clusterControl.announceScaleDown(new SimpleString(this.targetNodeId), nodeManager.getNodeId());
@@ -307,7 +307,7 @@ public class ScaleDownHandler {
    }
 
    private String getTargetNodeId(ClientSessionFactory sessionFactory) {
-      return sessionFactory.getServerLocator().getTopology().getMember(sessionFactory.getConnectorConfiguration()).getNodeId();
+      return sessionFactory.getServerLocator().getTopology().getMember(sessionFactory.getConnection()).getNodeId();
    }
 
    public void scaleDownTransactions(ClientSessionFactory sessionFactory,
